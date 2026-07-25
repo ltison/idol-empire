@@ -504,7 +504,9 @@ kbd{
   .stage{ padding:18px 14px 80px; }
   .hud{ gap:14px; width:100%; margin-left:0; order:3; }
   .topbar{ gap:12px; }
-  .g-3{ grid-template-columns:1fr; }
+  /* Both card grids drop to one column — .g-2's 430px minimum is wider than a
+     phone, and auto-fill honours it, which pushed the whole stage sideways. */
+  .g-2, .g-3{ grid-template-columns:1fr; }
 }
 @media (prefers-reduced-motion:reduce){
   *{ animation:none !important; transition:none !important; }
