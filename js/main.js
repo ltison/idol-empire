@@ -177,6 +177,14 @@
       ui.render();
     },
 
+    'scout-rival'(d) {
+      const r = KP.engine.scoutRival(KP.state, d.id);
+      if (!r.ok) return ui.toast(r.msg, 'bad');
+      ui.render();
+      KP.save();                    // paid intelligence must survive a closed tab
+      ui.toast('Report filed — their diary is open.', 'good');
+    },
+
     'open-debut'() { ui.openDebut(); },
     'open-comeback'(d) { ui.openComeback(d.id); },
 
@@ -314,7 +322,7 @@
     if ($('#modal-root').children.length) return;
     if (e.key === 'n' || e.key === 'N') { e.preventDefault(); advanceWeek(); }
     // Same order as the .rail-btn list in index.html and ui.js's views map.
-    const tabs = ['dash', 'trainees', 'scout', 'groups', 'sched', 'chart', 'log'];
+    const tabs = ['dash', 'trainees', 'scout', 'groups', 'sched', 'chart', 'rivals', 'log'];
     const i = parseInt(e.key, 10);
     if (i >= 1 && i <= tabs.length) { ui.tab = tabs[i - 1]; ui.render(); }
   });

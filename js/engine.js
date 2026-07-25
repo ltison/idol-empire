@@ -109,14 +109,20 @@
      prizes are contested on at roughly its opening size. */
   function rivalName(st) {
     const known = st.knownRivals || {};
+    // Names that belong to an agency with actual members in it. They are stamped
+    // into knownRivals at debut and their names come out of the same
+    // KP.groupNameParts bag as a generated debutant's, so without this the
+    // anonymous market would publish songs under a group the player can open and
+    // read the line-up of — two different acts, one name, one chart.
+    const owned = KP.rivalGroupNames(st);
     if (st.awards.length && U.chance(KP.rivalDebutChance)) {
       for (let i = 0; i < 12; i++) {
         const n = U.pick(KP.groupNameParts.a) + (U.chance(.5) ? ' ' : ':') + U.pick(KP.groupNameParts.b);
-        if (known[n] == null && !st.groups.some(g => g.name === n)) return n;
+        if (known[n] == null && owned.indexOf(n) < 0 && !st.groups.some(g => g.name === n)) return n;
       }
     }
     const active = Object.keys(known).filter(n =>
-      known[n] > 0 && st.year - known[n] <= KP.rivalDebutActive);
+      known[n] > 0 && st.year - known[n] <= KP.rivalDebutActive && owned.indexOf(n) < 0);
     return U.pick(active.length ? KP.rivalArtists.concat(active) : KP.rivalArtists);
   }
 
@@ -148,7 +154,11 @@
 
   /* Builds the full ranked table: rivals + every active release we own. */
   function buildChart(st) {
-    const rows = st.market.map(s => ({ artist: s.artist, title: s.title, points: s.points, mine: false }));
+    // `rid` rides along on a rival agency's own release so step 4b can find its
+    // row again. Every other consumer of a chart row ignores it.
+    const rows = st.market.map(s => ({
+      artist: s.artist, title: s.title, points: s.points, mine: false, rid: s.rid || null
+    }));
     st.groups.forEach(g => {
       if (!g.active) return;
       rows.push({ artist: g.name, title: g.active.title, points: g.active.points, mine: true, groupId: g.id });
@@ -157,6 +167,309 @@
     rows.forEach((r, i) => r.rank = i + 1);
     return rows;
   }
+
+  /* ============================ rival agencies ==============================
+     The market above is a chart with nobody behind it. This is the other half:
+     four buildings that audition, train, debut and come back on a diary, and
+     whose releases go into the SAME st.market and are ranked by the same
+     buildChart. A rival song is a market song with a `rid` on it — nothing else
+     in the chart pipeline needs to know they exist, and a save that predates
+     them is a save whose market is simply all anonymous.
+
+     Two entry points, and the split between them is the ordering rule:
+
+       E.rivalWeek      step 3c, BEFORE buildChart. They act, and a comeback
+                        whose week has come enters the market in time to be on
+                        THIS week's chart — the week the player was warned about.
+       E.rivalChartWeek step 4b, AFTER buildChart. They read the same ranking the
+                        player does: fandom, momentum, peak, and the moment a
+                        song drops out of the market and the run is archived.
+
+     Nothing here bills or credits the player's balance. The only won a rival
+     ever moves is the cost of a scouting report, which the player chooses.
+     ======================================================================== */
+
+  /* They train too, and this is why passing on a fifteen-year-old ace has a
+     price with a two-year fuse. Flat toward the ceiling rather than the player's
+     whole stamina/morale/facility stack: an agency the player cannot manage does
+     not need a management model, it needs to get better at a legible rate. */
+  function trainRival(r, sp) {
+    const rate = KP.rivals.trainRate * sp.pull;
+    const bump = (t) => KP.STATS.forEach(s => {
+      const gap = t.potential[s.k] - t.stats[s.k];
+      if (gap <= 0) return;
+      // Rounded on the way in, not on the way out: KP.save() stringifies the
+      // whole state every week and sixty-odd rival people carrying six
+      // full-precision floats each is most of a save file, for a number nothing
+      // in the game ever reads past one decimal.
+      const v = Math.min(t.potential[s.k], t.stats[s.k] + rate * (gap / 26));
+      t.stats[s.k] = Math.round(v * 10) / 10;
+    });
+    r.trainees.forEach(bump);
+    r.groups.forEach(g => g.members.forEach(bump));
+  }
+
+  /* The diary. A plan exists from the moment the last release wrapped, weeks or
+     months before the player is allowed to see it — which is what a scouting
+     report buys, and why the wall is a decision rather than a dice roll. */
+  function planComeback(st, r, g, abs, gap) {
+    const at = abs + gap;
+    // Nothing gets booked past the end of the contract. An announcement four
+    // weeks out is a promise the player plans around, and an act that retired
+    // before its own comeback would be a wall that never arrived — so the last
+    // release inside the term is simply the last one, and the diary goes empty.
+    if (typeof g.retireAbs === 'number' && at > g.retireAbs) { g.plan = null; return; }
+    const season = KP.seasonOfAbs(at);
+    // They chase the season and the trend board exactly like the player does, so
+    // the fashionable week is a contested week rather than a free one.
+    const concept = U.chance(.55) ? U.pick(season.favours)
+      : KP.concepts.slice().sort((a, b) => st.trends[b.k] - st.trends[a.k])[0].k;
+    g.plan = {
+      absWeek: at,
+      title: U.pick(KP.titleWords.a) + ' ' + U.pick(KP.titleWords.b),
+      concept,
+      announced: false
+    };
+  }
+
+  /* What a rival release is worth, with no roll in it — so the schedule board,
+     the comeback planner and the release itself all quote one number.
+
+     Deliberately the SAME SHAPE as E.planPreview's last line, `quality * .58 +
+     hype * .42`, because the two numbers are ranked against each other on one
+     chart and a formula of a different shape does not stay comparable as either
+     side grows. `pull` stands in for everything the player buys a tier at a time
+     — the producer, the choreographer, the film crew — which is what an agency's
+     prestige actually is.
+
+     Written the first way round (skill + fandom + trend, all multiplied) every
+     established rival sat on the 99 clamp within three years: three uncapped
+     terms and two multipliers on top, against a player whose two terms are each
+     capped at 100 by construction. Every comeback was then the same
+     unbeatable wall, which is the opposite of a wall being worth announcing. */
+  E.rivalStrength = function (st, r, g, absWeek, conceptKey) {
+    const sp = KP.rivalSpec(r);
+    if (!sp) return 0;
+    const key = conceptKey || (g.plan && g.plan.concept) || g.concept;
+    const skill = E.groupScore(g.members, key);
+    // Capped like the player's own fanPull, and lower: past a million fans every
+    // agency would otherwise carry the identical term and the roster flattens.
+    const fanPull = Math.min(26, Math.pow(Math.max(g.fans, 1), .42) / 6);
+    const quality = U.clamp(skill * .46 + sp.pull * 32, 0, 100);
+    const hype = U.clamp(fanPull + E.conceptTrend(st, key) * .28 + g.momentum * .18, 0, 100);
+    // The last years of the contract, read at the week being asked about rather
+    // than at today: a comeback four weeks out is quoted with the edge the act
+    // will have on the night. This is the only term that can fall over a career
+    // — everything above it plateaus — and it is what makes a veteran wall
+    // beatable before it is gone rather than the week after.
+    const fade = KP.rivalCareer(st, g, absWeek).fade;
+    return U.clamp((quality * .58 + hype * .42) * KP.seasonOfAbs(absWeek).field * fade, 8, 99);
+  };
+
+  /* What an unscouted comeback is called. The player is told a rival is coming
+     either way; the number is what the report is for. */
+  E.rivalWall = function (points) {
+    const R = KP.rivals;
+    return points >= R.wallBig ? 'a wall' : points >= R.wallReal ? 'a serious comeback' : 'a small release';
+  };
+
+  function releaseRival(st, r, g, abs) {
+    const plan = g.plan;
+    g.plan = null;
+    const points = U.clamp(E.rivalStrength(st, r, g, abs, plan.concept) * U.rnd(.92, 1.10), 8, 99);
+    ensureMarket(st);
+    // Into the same market as everything else, so tickMarket decays it, the
+    // twelve-week window retires it and buildChart ranks it against the player.
+    st.market.push({ artist: g.name, title: plan.title, points, week: 1, rid: g.id });
+    g.active = { title: plan.title, concept: plan.concept, points, peak: 99, weeks: 0, no1: 0 };
+    g.lastReleaseAbs = abs;
+    g.momentum = U.clamp(g.momentum + 10, 0, 100);
+    // The next one goes straight back in the diary — an agency is never between
+    // plans, only between what the player can and cannot see.
+    const sp = KP.rivalSpec(r);
+    planComeback(st, r, g, abs, U.irnd(sp.pace[0], sp.pace[1]));
+    KP.log(sp.name + '’s ' + g.name + ' is back with “' + plan.title + '”.', 'info');
+    pushRecap(st, '⚔️', g.name + ' (' + sp.name + ') released “' + plan.title + '”', '');
+  }
+
+  function maybeRivalDebut(st, r, sp, abs) {
+    const R = KP.rivals;
+    if (r.groups.length >= sp.maxGroups) return;
+    if (abs - (r.lastDebutAbs || 0) < R.debutGap) return;
+    const ready = r.trainees.filter(t => KP.overall(t) >= R.debutOverall)
+      .sort((a, b) => KP.overall(b) - KP.overall(a));
+    if (ready.length < R.debutReady) return;
+
+    const members = ready.slice(0, Math.min(ready.length, U.irnd(R.memberRange[0], R.memberRange[1])));
+    const g = KP.newRivalGroup(st, r, members);
+    r.trainees = r.trainees.filter(t => members.indexOf(t) < 0);
+    r.lastDebutAbs = abs;
+    planComeback(st, r, g, abs, U.irnd(R.firstGap[0], R.firstGap[1]));
+    // Loud on purpose: this is the other half of the rookie race, and the player
+    // may well be looking at somebody they auditioned two years ago.
+    KP.log('🎬 ' + sp.name + ' debuted ' + g.name + ' — ' + members.length + ' members, ' +
+      U.num(g.fans) + ' fans on day one.', 'big');
+    pushRecap(st, '🎬', sp.name + ' debuted ' + g.name, 'big');
+  }
+
+  /* Step 3c. */
+  E.rivalWeek = function (st) {
+    KP.seedRivals(st);
+    const R = KP.rivals;
+    const abs = KP.absWeek(st);
+    st.rivals.forEach(r => {
+      const sp = KP.rivalSpec(r);
+      if (!sp) return;
+      trainRival(r, sp);
+      // An agency with no room for another act stops auditioning. It can still
+      // be poached into — a major always signs the best kid in the room — but it
+      // stops manufacturing hopefuls it has nowhere to debut.
+      if (r.groups.length < sp.maxGroups && r.trainees.length < R.rosterCap && U.chance(sp.recruit)) {
+        r.trainees.push(KP.makeRivalPerson(U.rnd(sp.quality[0], sp.quality[1]), sp.gender));
+      }
+      maybeRivalDebut(st, r, sp, abs);
+
+      // The contract runs out. This is the ONLY thing that frees a group slot,
+      // and therefore the only thing that keeps agency debuts happening at all:
+      // without it every agency reaches maxGroups inside two years and never
+      // debuts again, the rookie race loses its agency half, and the hopeful the
+      // player passed on sits in somebody else's building for the rest of the
+      // run with nowhere to go. It is a term rather than a performance test
+      // because these acts never stop charting — see the note in KP.rivals.
+      // Never mid-promotion: an act sees its last release out first, so no song
+      // vanishes off a chart the player is competing on.
+      const gone = r.groups.filter(g => !g.active && KP.rivalCareer(st, g, abs).done);
+      if (gone.length) {
+        r.groups = r.groups.filter(g => gone.indexOf(g) < 0);
+        gone.forEach(g => {
+          const yrs = Math.max(1, Math.round(KP.rivalCareer(st, g, abs).years));
+          KP.log(sp.name + ' and ' + g.name + ' did not renew — ' + yrs + ' years, ' +
+            g.releases.length + ' single' + (g.releases.length === 1 ? '' : 's') + ', and that is the run.', 'info');
+          pushRecap(st, '🕯', g.name + ' (' + sp.name + ') have disbanded', '');
+        });
+      }
+
+      r.groups.forEach(g => {
+        // A group loaded out of a save from before the diary existed, or one that
+        // somehow lost its plan, gets one rather than going quiet forever — but
+        // planComeback refuses to book past the term, so an act inside its last
+        // months keeps an empty diary and simply waits for the block above.
+        if (!g.plan) planComeback(st, r, g, abs, U.irnd(sp.pace[0], sp.pace[1]));
+        if (!g.plan) return;
+        if (g.plan.absWeek <= abs) return releaseRival(st, r, g, abs);
+        // The week it becomes public knowledge. Checked with <= rather than ===
+        // so a save loaded inside the window still announces exactly once.
+        if (!g.plan.announced && g.plan.absWeek - abs <= R.announceLead) {
+          g.plan.announced = true;
+          const pts = E.rivalStrength(st, r, g, g.plan.absWeek);
+          KP.log(sp.name + ' announced a ' + g.name + ' comeback for ' +
+            weekLabel(st, g.plan.absWeek) + ' — ' + E.rivalWall(pts) + '.', 'info');
+          pushRecap(st, '📣', g.name + ' comeback announced · ' + weekLabel(st, g.plan.absWeek), '');
+        }
+      });
+    });
+  };
+
+  /* Step 4b. Reads the full chart, not st.chart's stored twenty-five: a rival
+     group holding #34 for two months is a real year and its fandom should say so. */
+  E.rivalChartWeek = function (st, chart) {
+    if (!st.rivals || !st.rivals.length) return;
+    const rows = {};
+    chart.forEach(row => { if (row.rid) rows[row.rid] = row; });
+
+    st.rivals.forEach(r => {
+      const sp = KP.rivalSpec(r);
+      r.groups.forEach(g => {
+        const row = rows[g.id];
+        if (row) {
+          if (!g.active) g.active = { title: row.title, concept: g.concept, points: row.points, peak: 99, weeks: 0, no1: 0 };
+          g.quiet = 0;
+          g.active.points = row.points;
+          g.active.peak = Math.min(g.active.peak, row.rank);
+          g.active.weeks++;
+          // Damped through the same fanGain the player's fandom is, for the same
+          // reason: this is a percentage-free but unbounded source, and an
+          // undamped rival fandom feeds straight back into their opening points.
+          g.fans += fanGain(g, Math.pow(row.points, 1.5) * KP.rivals.fanPerPoint);
+          if (row.rank === 1) {
+            g.active.no1++;
+            g.momentum = U.clamp(g.momentum + 8, 0, 100);
+            KP.log('🏆 ' + g.name + ' (' + sp.name + ') took #1 with “' + row.title + '”.', 'bad');
+          } else if (row.rank <= 10) {
+            g.momentum = U.clamp(g.momentum + 2.5, 0, 100);
+          }
+          return;
+        }
+        // No row means the song has decayed out of the market: the run is over.
+        if (g.active) {
+          const a = g.active;
+          g.releases.unshift({ title: a.title, concept: a.concept, peak: a.peak, weeks: a.weeks, no1: a.no1, y: st.year, w: st.week });
+          while (g.releases.length > 12) g.releases.pop();
+          g.momentum = U.clamp(g.momentum + (a.peak <= 3 ? 12 : a.peak <= 10 ? 5 : -6), 0, 100);
+          g.active = null;
+        }
+        g.quiet = (g.quiet || 0) + 1;
+        g.fans = Math.round(g.fans * KP.rivals.idleDecay);
+        g.momentum = U.clamp(g.momentum - 1.6, 0, 100);
+      });
+    });
+  };
+
+  /* The audition room, from the other side. Called on the way OUT of a round —
+     the hopefuls the player left on the table are the ones somebody else signs,
+     and they turn up four years later with a name the player recognises.
+
+     Only agencies auditioning for the player's own kind of group are in the
+     room, which is also the rule that keeps a boy-group agency from debuting the
+     girl trainee you passed on. */
+  E.rivalPoach = function (st) {
+    KP.seedRivals(st);
+    const R = KP.rivals;
+    if (!st.scoutPool.length || !U.chance(R.poachChance)) return null;
+    const pool = st.rivals.filter(r => {
+      const sp = KP.rivalSpec(r);
+      return sp && sp.gender === st.company.gender;
+    });
+    if (!pool.length) return null;
+    const best = st.scoutPool.slice().sort((a, b) => KP.potentialOverall(b) - KP.potentialOverall(a))[0];
+    // Nobody makes the news for signing an average hopeful.
+    if (!best || KP.potentialOverall(best) < R.poachFloor) return null;
+
+    const r = U.pick(pool);
+    const sp = KP.rivalSpec(r);
+    // A full building still signs the best kid in the room — it lets somebody go
+    // to do it. Gating the poach on a free desk instead is what quietly ended
+    // this mechanic around year two: every roster reaches the cap and stays
+    // there, and the one thing that makes an audition decision hurt stops
+    // happening for the rest of the run.
+    if (r.trainees.length >= R.rosterCap) {
+      const worst = r.trainees.slice().sort((a, b) => KP.potentialOverall(a) - KP.potentialOverall(b))[0];
+      if (!worst || KP.potentialOverall(worst) >= KP.potentialOverall(best)) return null;
+      r.trainees = r.trainees.filter(t => t !== worst);
+    }
+    st.scoutPool = st.scoutPool.filter(t => t !== best);
+    r.trainees.push(KP.stripRivalPerson(best));
+    KP.log(sp.name + ' signed ' + best.name + ' out of the audition room you just closed — ceiling ' +
+      KP.potentialOverall(best) + '.', 'bad');
+    pushRecap(st, '🕵️', sp.name + ' signed ' + best.name + ' · ceiling ' + KP.potentialOverall(best), 'bad');
+    return best;
+  };
+
+  /* A report on one building: their trainee roster, their line-ups, and the
+     whole comeback diary rather than the four weeks of it that are public. It
+     buys information and nothing else — no gate moves, no number improves. */
+  E.scoutRival = function (st, id) {
+    const r = (st.rivals || []).find(x => x.id === id);
+    const sp = r && KP.rivalSpec(r);
+    if (!sp) return { ok: false, msg: 'No such agency.' };
+    const cost = KP.rivals.scoutCost;
+    if (st.company.money < cost) return { ok: false, msg: 'A scouting report costs ' + U.money(cost) + '.' };
+    st.company.money -= cost;
+    r.scoutedAbs = KP.absWeek(st);
+    KP.log('Commissioned a report on ' + sp.name + ' · ' + U.money(cost) +
+      ' — their diary is open for ' + KP.rivals.scoutWeeks + ' weeks.', 'info');
+    return { ok: true, cost };
+  };
 
   /* ============================== training ================================= */
 
@@ -1413,6 +1726,13 @@
     //     up a week late — the stage would look like it did nothing.
     E.resolveBookings(st);
 
+    // 3c. the four agencies act: their people improve, a group debuts, and a
+    //     comeback whose week has come enters the market. Before buildChart for
+    //     the same reason 3b is — a rival release the player was warned about
+    //     four weeks ago has to be on the chart of the week it was warned for,
+    //     not the one after it.
+    E.rivalWeek(st);
+
     const chart = buildChart(st);
     st.chart = chart.slice(0, 25);
 
@@ -1432,6 +1752,10 @@
       E.earn(st, g.fans * KP.income.merchPerFan, 'merch');
     });
 
+    // 4b. the rival groups read the same ranking, off the full chart rather than
+    //     the twenty-five rows that get stored. Nothing here touches the books.
+    E.rivalChartWeek(st, chart);
+
     // 5. books
     st.company.money -= KP.weeklyBurn(st);
     st.company.money += KP.weeklyMisc(st);
@@ -1444,8 +1768,12 @@
     // 6. events
     runEvents(st);
 
-    // 7. audition list refreshes on its own every 4 weeks
-    if (KP.absWeek(st) - st.scoutRefreshedWeek >= 4) KP.refreshScouts();
+    // 7. audition list refreshes on its own every 4 weeks — and somebody else
+    //    gets the room's best hopeful on the way out, which is the point.
+    if (KP.absWeek(st) - st.scoutRefreshedWeek >= 4) {
+      E.rivalPoach(st);
+      KP.refreshScouts();
+    }
 
     // 8. fail state — two ways to lose, and they are not the same failure. The
     //    guard keeps 5b's more specific reason rather than overwriting it.
@@ -1481,6 +1809,9 @@
       return { ok: false, msg: 'An early audition round costs ' + U.money(cost) + '.' };
     }
     st.company.money -= cost;
+    // Churning the room has the same cost as letting it lapse: whoever you did
+    // not sign is on somebody else's books by the time the new list is posted.
+    E.rivalPoach(st);
     KP.refreshScouts(true);
     KP.log('Called an early audition round for ' + U.money(cost) + ' — 6 hopefuls waiting.', 'info');
     return { ok: true, cost };

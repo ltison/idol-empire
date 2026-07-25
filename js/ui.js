@@ -564,10 +564,16 @@
         </div>`;
       }).join('');
 
+      // Somebody else's week, on the board you are filling in. A booked stage is
+      // worth more against a thin chart, so the wall belongs next to the button.
+      const wall = KP.rivalPlansIn(st, abs).map(({ r, g }) =>
+        `<span class="chip hot" title="${U.esc(KP.rivalSpec(r).name)} · ${U.esc(KP.concept(g.plan.concept).name)} · ${U.esc(KP.engine.rivalWall(KP.engine.rivalStrength(st, r, g, abs)))}">⚔ ${U.esc(g.name)}</span>`).join('');
+
       weeks.push(`<div class="card sched-week" style="margin-bottom:10px">
         <div class="sw-head">
           <b class="mono">${U.esc(KP.engine.weekLabel(st, abs))}</b>
           <span class="chip">${U.esc(season.kr)} · ${U.esc(season.name)}</span>
+          ${wall}
           <span class="spacer"></span>
           <span class="tiny muted">${booked.length
         ? booked.length + ' booked · ' + U.money(booked.reduce((s, b) => s + b.fee, 0)) + ' paid'
@@ -604,12 +610,197 @@
     if (!st.chart || !st.chart.length) {
       return head + `<div class="empty"><b>Chart not published yet</b>Advance a week to see where the market stands.</div>` + hist;
     }
-    const rows = st.chart.slice(0, 20).map(r => `<div class="rung ${r.mine ? 'mine' : ''} ${r.rank === 1 ? 'top1' : ''}">
+    const rows = st.chart.slice(0, 20).map(r => {
+      // A song with an agency behind it says so — the rest of the ladder is the
+      // anonymous market, and the difference is the whole of this sprint.
+      const act = r.rid ? KP.rivalAct(st, r.rid) : null;
+      const by = act ? ' · ' + KP.rivalSpec(act.r).name : '';
+      return `<div class="rung ${r.mine ? 'mine' : ''} ${r.rank === 1 ? 'top1' : ''}">
       <div class="rk">${r.rank}</div>
-      <div><div class="ttl">${U.esc(r.title)}</div><div class="art">${U.esc(r.artist)}</div></div>
+      <div><div class="ttl">${U.esc(r.title)}</div><div class="art">${U.esc(r.artist)}${U.esc(by)}</div></div>
       <div class="pts">${r.points.toFixed(1)}</div>
-    </div>`).join('');
+    </div>`;
+    }).join('');
     return head + `<div class="card"><div class="ladder">${rows}</div></div>` + hist;
+  }
+
+  /* ------------------------------ the rivals -------------------------------
+     Four buildings, and the whole screen is one question: how much of them are
+     you allowed to see? Everything public is here for nothing — their groups,
+     their line-ups, their chart year, a comeback inside the announcement window.
+     A report opens the rest of the diary, and the diary is what lets you move a
+     release off somebody else's week. */
+
+  function topStat(t) {
+    const best = KP.STATS.slice().sort((a, b) => t.stats[b.k] - t.stats[a.k])[0];
+    return best.label.slice(0, 3).toUpperCase() + ' ' + Math.round(t.stats[best.k]);
+  }
+
+  /* Rival people are trainee records with no position on them — they are not on
+     the player's books and never get one — so the caption is their best stat. */
+  function rivalStrip(people) {
+    if (!people.length) return `<p class="tiny muted" style="margin:0">Nobody signed.</p>`;
+    return `<div class="member-strip">${people.map(m => `<div class="member">
+      ${avatar(m)}<em>${U.esc(m.name.split(' ')[0])}</em><i>${topStat(m)}</i>
+    </div>`).join('')}</div>`;
+  }
+
+  /* This year's debutants, everybody's. Read straight off the running yearbook,
+     which is the same accumulator the Rookie of the Year ballot is settled from —
+     so this board is the prize, months early, rather than a view of it. */
+  function rookieRace(st) {
+    const acts = (st.yearbook && st.yearbook.acts) || {};
+    const owner = {};
+    KP.rivalActs(st).forEach(x => { owner[x.g.name] = KP.rivalSpec(x.r).name; });
+
+    const seen = {};
+    const rows = [];
+    Object.keys(acts).forEach(k => {
+      const a = acts[k];
+      if (a.debutY !== st.year) return;
+      seen[a.name] = 1;
+      rows.push({ name: a.name, mine: !!a.mine, cp: a.cp, no1: a.no1, tag: a.mine ? 'yours' : (owner[a.name] || 'independent') });
+    });
+    // A debut you watched happen belongs on the board the week it happens, not
+    // the week it first charts.
+    KP.rivalActs(st).forEach(({ r, g }) => {
+      if (g.debutY !== st.year || seen[g.name]) return;
+      rows.push({ name: g.name, mine: false, cp: 0, no1: 0, tag: KP.rivalSpec(r).name });
+    });
+    st.groups.forEach(g => {
+      if (!g.debut || g.debut.y !== st.year || seen[g.name]) return;
+      rows.push({ name: g.name, mine: true, cp: 0, no1: 0, tag: 'yours' });
+    });
+    if (!rows.length) return '';
+    rows.sort((a, b) => b.cp - a.cp);
+
+    return `<div class="card" style="margin-bottom:16px">
+      <div class="sec-head"><h2>The rookie race</h2><span class="kr">신인상 경쟁</span>
+        <p>Year ${st.year} debutants · ${rows.length} on the board</p></div>
+      <div class="disc" style="margin-top:0">${rows.map((r, i) => `<div class="disc-row">
+        <span class="pk ${r.mine ? 'gold' : ''}">${i + 1}</span>
+        <span>${U.esc(r.name)} <span class="muted tiny">${U.esc(r.tag)}</span></span>
+        <span class="mono tiny ${r.cp >= KP.awards.minBallot ? '' : 'muted'}">${U.num(r.cp)} pts</span>
+        <span class="mono tiny ${r.no1 ? 'gold' : 'muted'}">${r.no1}🏆</span>
+      </div>`).join('')}</div>
+      <p class="tiny muted" style="margin:10px 0 0">Rookie of the Year is settled on chart points and weeks at #1 —
+        the sales axis is dropped entirely, which is what gives a first-year group a real shot at it.
+        ${KP.awards.minBallot} points is the minimum to be on the ballot at all.</p>
+    </div>`;
+  }
+
+  function rivalsTab(st) {
+    const R = KP.rivals;
+    const now = KP.absWeek(st);
+    const head = `<div class="sec-head"><h2>Rival agencies</h2><span class="kr">경쟁사</span>
+      <p>${st.rivals.length} buildings · the same chart, the same audition rooms</p></div>`;
+    if (!st.rivals.length) {
+      return head + `<div class="empty"><b>Nobody on the board</b>Advance a week and the market will introduce itself.</div>`;
+    }
+
+    const acts = (st.yearbook && st.yearbook.acts) || {};
+
+    const cards = st.rivals.map(r => {
+      const sp = KP.rivalSpec(r);
+      if (!sp) return '';
+      const scouted = KP.rivalScouted(st, r);
+      const year = (g) => acts['r:' + g.name] || null;
+      const cpY = r.groups.reduce((s, g) => { const a = year(g); return s + (a ? a.cp : 0); }, 0);
+      const no1Y = r.groups.reduce((s, g) => { const a = year(g); return s + (a ? a.no1 : 0); }, 0);
+      const fans = r.groups.reduce((s, g) => s + g.fans, 0);
+
+      const groups = r.groups.map(g => {
+        const row = (st.chart || []).find(x => x.rid === g.id);
+        const last = g.releases[0];
+        const plan = KP.rivalPlanVisible(st, r, g) ? g.plan : null;
+        const pts = plan ? KP.engine.rivalStrength(st, r, g, plan.absWeek) : 0;
+        const away = plan ? plan.absWeek - now : 0;
+
+        const status = row
+          ? `<span class="chip ${row.rank === 1 ? 'win' : 'hot'}">#${row.rank} · “${U.esc(row.title)}”</span>`
+          : g.active
+            ? `<span class="chip hot">Promoting “${U.esc(g.active.title)}”</span>`
+            : `<span class="chip">Resting</span>`;
+
+        // The whole point of the tab: a week with somebody else's name on it.
+        const wall = plan
+          ? `<p class="tiny ${away <= 2 ? 'neg' : ''}" style="margin:8px 0 0">⚔ Comeback ${U.esc(KP.engine.weekLabel(st, plan.absWeek))}
+              — in ${away} week${away === 1 ? '' : 's'} · ${U.esc(KP.concept(plan.concept).name)} ·
+              ${scouted
+              ? '≈' + Math.round(pts) + ' opening points'
+              : U.esc(KP.engine.rivalWall(pts)) + ' (a report would price it)'}</p>`
+          : `<p class="tiny muted" style="margin:8px 0 0">No comeback announced${scouted ? '' : ' — anything more than ' + R.announceLead + ' weeks out is behind a report'}.</p>`;
+
+        // An act on the way out is worth saying out loud: the fade is already in
+        // the opening points quoted above, so a wall getting beatable should not
+        // read as the numbers wobbling. The year it ends is a scouted fact —
+        // unscouted you get told they are late in the run and nothing sharper.
+        const career = KP.rivalCareer(st, g);
+        const era = career.left > R.fadeYears ? ''
+          : scouted
+            ? `<span class="chip">Final ${career.left <= 1 ? 'year' : Math.ceil(career.left) + ' years'}</span>`
+            : `<span class="chip">Late in their run</span>`;
+
+        return `<div class="riv-g">
+          <div class="riv-head">
+            <span class="riv-nm">${U.esc(g.name)}</span>
+            <span class="tiny muted">${U.esc(KP.concept(g.concept).name)} ·
+              ${g.debutY ? 'debut Y' + g.debutY + ' W' + g.debutW : 'established'}</span>
+            ${era}
+            <span class="spacer" style="margin-left:auto"></span>${status}
+          </div>
+          ${rivalStrip(g.members)}
+          <div class="kv" style="margin:12px 0 0">
+            <div><b>${U.num(g.fans)}</b><span>Est. fandom</span></div>
+            <div><b>${Math.round(g.momentum)}</b><span>Momentum</span></div>
+            <div><b>${g.releases.length}</b><span>Releases</span></div>
+            <div><b class="${last && last.peak === 1 ? 'gold' : ''}">${last ? '#' + last.peak : '—'}</b><span>Last peak</span></div>
+          </div>
+          ${wall}
+        </div>`;
+      }).join('');
+
+      return `<article class="card group-card" style="--accent:${sp.color}">
+        <div class="group-head">
+          <div>
+            <div class="group-name">${U.esc(sp.name)}</div>
+            <div class="group-kr">${U.esc(sp.kr)}</div>
+            <div class="idol-meta">${sp.gender === 'f' ? 'Girl groups' : 'Boy groups'} ·
+              ${r.groups.length}/${sp.maxGroups} acts · comeback every ${sp.pace[0]}–${sp.pace[1]} weeks</div>
+          </div>
+          <span class="spacer"></span>
+          ${scouted ? `<span class="chip cool">Report · ${KP.rivalScoutLeft(st, r)}w left</span>` : ''}
+        </div>
+        <p class="tiny muted" style="margin:-6px 0 12px">${U.esc(sp.desc)}</p>
+
+        <div class="kv">
+          <div><b>${U.num(fans)}</b><span>Est. fandom</span></div>
+          <div><b>${U.num(cpY)}</b><span>Chart points Y${st.year}</span></div>
+          <div><b class="${no1Y ? 'gold' : ''}">${no1Y}</b><span>Weeks at #1</span></div>
+          <div><b>${r.trainees.length}</b><span>Trainees</span></div>
+        </div>
+
+        ${groups}
+
+        <div class="riv-g">
+          <div class="riv-head"><span class="riv-nm">The building</span>
+            <span class="tiny muted">${r.trainees.length} under contract, none of them debuted</span></div>
+          ${scouted ? rivalStrip(r.trainees)
+          : `<p class="tiny muted" style="margin:0">Who they signed is not public. A report names them, prices their
+             comebacks and stays good for ${R.scoutWeeks} weeks.</p>`}
+        </div>
+
+        <div class="row" style="margin-top:14px">
+          <button class="btn" data-act="scout-rival" data-id="${r.id}" ${scouted ? 'disabled' : ''}>
+            ${scouted ? 'Report active' : 'Scouting report · ' + U.money(R.scoutCost)}</button>
+          <span class="tiny muted">${scouted
+          ? 'Their whole diary is open for another ' + KP.rivalScoutLeft(st, r) + ' weeks.'
+          : 'Buys information and nothing else — no gate moves and no number improves.'}</span>
+        </div>
+      </article>`;
+    }).join('');
+
+    return head + rookieRace(st) + `<div class="grid g-2">${cards}</div>`;
   }
 
   function logTab(st) {
@@ -650,6 +841,10 @@
     $('#badge-scout').textContent = st.scoutPool.length || '';
     $('#badge-groups').textContent = st.groups.length || '';
     $('#badge-sched').textContent = st.bookings.length || '';
+    // The rail is where a wall is worth noticing: how many announced rival
+    // comebacks are inside the window you can still move a release around.
+    $('#badge-rivals').textContent =
+      KP.rivalPlansIn(st, KP.absWeek(st) + 1, KP.absWeek(st) + KP.rivals.announceLead).length || '';
 
     document.querySelectorAll('.rail-btn').forEach(b =>
       b.classList.toggle('is-on', b.dataset.tab === ui.tab));
@@ -657,7 +852,7 @@
     // Same order as the rail in index.html and the tabs array in main.js.
     const views = {
       dash: officeTab, trainees: traineesTab, scout: scoutTab, groups: groupsTab,
-      sched: schedTab, chart: chartTab, log: logTab
+      sched: schedTab, chart: chartTab, rivals: rivalsTab, log: logTab
     };
     $('#stage').innerHTML = (views[ui.tab] || officeTab)(st);
     $('#stage').scrollTop = 0;
@@ -816,6 +1011,18 @@
     const totalPromo = promo.cost * promo.weeks;
     const afford = st.company.money >= upfront;
 
+    // What else is coming out while this song is still promoting. Only the plans
+    // the player is allowed to see, and priced only for an agency they have a
+    // report on — the point of the line is that waiting a week is a move.
+    const from = KP.absWeek(st);
+    const walls = KP.rivalPlansIn(st, from, from + promo.weeks).map(({ r, g }) => {
+      const pts = KP.engine.rivalStrength(st, r, g, g.plan.absWeek);
+      const scouted = KP.rivalScouted(st, r);
+      return `<li>${U.esc(KP.engine.weekLabel(st, g.plan.absWeek))} — <b>${U.esc(g.name)}</b>
+        (${U.esc(KP.rivalSpec(r).name)}) · ${U.esc(KP.concept(g.plan.concept).name)} ·
+        ${scouted ? '≈' + Math.round(pts) + ' opening points' : U.esc(KP.engine.rivalWall(pts))}</li>`;
+    }).join('');
+
     const conceptOpts = KP.concepts.map(c => `<button class="opt ${p.concept === c.k ? 'is-on' : ''}"
         data-act="plan-concept" data-key="${c.k}">
         <div><b>${c.name} <span style="font-family:var(--kr);font-weight:400;color:var(--lilac)">${c.kr}</span></b>
@@ -863,6 +1070,8 @@
         ? 'A crowded chart: the same song ranks lower here.'
         : 'A thin chart: the same song ranks higher here.'}</p>
       ${pv.fatigue < 1 ? `<p class="tiny neg" style="margin:8px 2px 0">Only ${pv.gap} weeks since the last release — waiting until week 16 removes the fatigue penalty.</p>` : ''}
+      ${walls ? `<p class="tiny neg" style="margin:8px 2px 0">Announced comebacks inside these ${promo.weeks} promotion weeks:</p>
+        <ul class="tiny muted" style="margin:4px 2px 0;padding-left:18px">${walls}</ul>` : ''}
 
       <div class="modal-foot">
         <span class="tiny ${afford ? 'muted' : 'neg'}">

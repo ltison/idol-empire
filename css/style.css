@@ -368,6 +368,12 @@ kbd{
 .member em{ font-style:normal; font-size:10px; font-weight:700; line-height:1.1; }
 .member i{ font-style:normal; font-family:var(--mono); font-size:8px; color:var(--dim); letter-spacing:.06em; text-transform:uppercase; }
 
+/* A rival agency card holds several groups, so each act gets a rule above it
+   rather than a card of its own — one building, one card, however many acts. */
+.riv-g{ border-top:1px solid rgba(255,255,255,.07); margin-top:14px; padding-top:12px; }
+.riv-head{ display:flex; align-items:baseline; gap:9px; flex-wrap:wrap; margin-bottom:9px; }
+.riv-nm{ font-family:var(--display); font-size:14px; }
+
 .kv{ display:grid; grid-template-columns:repeat(auto-fit,minmax(96px,1fr)); gap:10px; margin:14px 0; }
 .kv div{ display:grid; gap:2px; }
 .kv b{ font-family:var(--mono); font-size:15px; white-space:nowrap; }

@@ -28,7 +28,7 @@ a message rather than half-loaded.
 | Key | Action |
 |---|---|
 | `N` | Advance one week |
-| `1`–`7` | Jump to Office / Trainees / Scouting / Groups / Schedule / Chart / Feed |
+| `1`–`8` | Jump to Office / Trainees / Scouting / Groups / Schedule / Chart / Rivals / Feed |
 | `Esc` | Close a dialog |
 
 ---
@@ -179,12 +179,48 @@ change what charting is worth, a diary you fill in yourself, and an ending in De
 - The free emergency investor that used to appear as an event is gone. A lender now just
   calls to remind you what you could still raise, which made borrowing a decision
 
-## Backlog — what the next sprints add
+## Sprint 3 — shipped
 
-**Sprint 3 — rivals with faces**
-Rival agencies that sign the trainees you passed on, debut competing groups, and steal
-your comeback week. A named rival roster you can scout, and a "who debuted this month"
-rookie race.
+The chart used to be weather: twenty-two names that entered, decayed and dropped out,
+and nobody behind any of them. Now four of the acts on it belong to **buildings you
+compete with**, and everything they do is something you can watch happen.
+
+**The four agencies** — a seventh tab, `⚔ Rivals`
+- PRISM MEDIA, HANRIVER ENT., NEON9 and BLUEPRINT LAB, each with a different shape:
+  prestige against cadence, so the two that hit hardest are the two that show up least
+  often. A crowded week is rarely the dangerous week
+- Two of them run boy groups, which is where the other half of the portrait pool lives
+- They audition, sign, train for years, debut, and come back on a diary
+- An act has a **contract**, six to nine years, and when it runs out the group disbands
+  and the slot goes to whoever is next in the trainee room. You see it coming: the last
+  couple of years cost them their edge, so a veteran wall is beatable before it is gone,
+  and a scouting report will tell you which year is their last
+- Their releases go into the same `st.market` and are ranked by the same chart. A rival
+  song carries the agency's name on the ladder; the rest of the chart is still the
+  anonymous market it always was
+
+**The audition room, from the other side**
+- Every time an audition list turns over — on its own timer or because you paid to
+  refresh it early — one of the agencies auditioning for your kind of group signs the
+  best hopeful you left on the table, by name, with their ceiling in the log line
+- A full building still signs the best kid in the room; it lets somebody go to do it
+- Four years later they debut, and the group beating you is one you had first refusal on
+
+**Their comeback week, and yours**
+- A comeback exists in their diary from the moment the last one wrapped. What changes is
+  whether you can see it: four weeks out it becomes public and appears on the schedule
+  board, in the comeback planner and on the rail badge
+- A **scouting report** (₩60,000,000, good for 26 weeks) opens the rest of that diary —
+  the whole comeback schedule, priced in opening points, plus the trainees they have
+  under contract. It buys information and nothing else: no gate moves and no number
+  improves. What it is worth is moving a release off somebody else's week
+- Rival opening points are built in the same shape as your own — `quality × .58 +
+  hype × .42` — because the two are ranked against each other on one chart
+
+**The rookie race**
+- This year's debutants on one board: your groups, the agencies' groups and the
+  anonymous debutants the market produces, sorted by the chart points the Rookie of the
+  Year ballot is actually settled on. The prize, months early, rather than a view of it
 
 Also in this sprint: **portraits**, because "with faces" ought to be literal. A pool of
 generated head-and-shoulders portraits under `img/faces/<gender>/NNN.webp`, one shared
@@ -200,8 +236,7 @@ studio style, addressed by index. Three rules hold it together:
   gradient monogram. The game stays playable with an empty `img/faces/`, which is what
   keeps the art optional rather than a load-bearing dependency.
 
-Portraits land here rather than in Sprint 6 because they are the cheap half of that
-sprint's "per-group visual identity" and the rival roster reads better with faces on it.
+## Backlog — what the next sprints add
 
 **Sprint 4 — the fandom as a system**
 Fandom loyalty and sentiment separate from size, international vs domestic split,

@@ -62,17 +62,18 @@ Engine mutators return `{ ok: false, msg }` on refusal and `{ ok: true, ... }` o
 `acts` handlers surface `msg` via `ui.toast(msg, 'bad')` and then call `ui.render()`.
 Engine functions never touch the DOM and never toast.
 
-Keyboard handling is in the same file: `N` advances a week, `1`–`7` map to the tab list.
+Keyboard handling is in the same file: `N` advances a week, `1`–`8` map to the tab list.
 Adding or reordering a tab means editing three places together: the `tabs` array in
 `main.js`, the `.rail-btn` order in `index.html`, and the `views` map in `ui.js`.
 
 ### The weekly tick
 
 `KP.engine.nextWeek()` is the heart of the game and runs eight numbered steps in order,
-plus three lettered ones wedged inside steps 3 and 5: trends drift → training → market tick
-→ **3b booked schedules resolve** → chart build → **3d the yearbook accrues** → group
-promo/decay + merch income → books (`weeklyBurn` − `weeklyMisc`) → **5b debt service** →
-events → audition refresh → fail state, then autosaves. An unnumbered rollover block above
+plus five lettered ones wedged inside steps 3, 4 and 5: trends drift → training → market
+tick → **3b booked schedules resolve** → **3c the rival agencies act** → chart build →
+**3d the yearbook accrues** → group promo/decay + merch income → **4b rival groups read
+the chart** → books (`weeklyBurn` − `weeklyMisc`) → **5b debt service** → events →
+audition refresh (**and a rival poaches on the way out**) → fail state, then autosaves. An unnumbered rollover block above
 step 1 announces a new season and, on a year boundary, holds the ceremony. Ordering matters
 for the economy — e.g. `releaseComeback` prepays the first promo week precisely because the
 final promo week clears `g.active` before step 5 bills.
@@ -90,6 +91,12 @@ The four ordering rules that are load-bearing rather than incidental:
   5b only amortises, judges whether it was paid with money that existed, and retires the
   facility. Running it before step 5 would skip the final instalment and prepaying instead
   would double-bill it.
+- **3c runs before `buildChart()` and 4b runs after it.** A rival agency's comeback is
+  announced four weeks ahead, so it has to enter the market in time to be on the chart of
+  the week it was announced for — releasing it after the build would put the wall a week
+  late, on a ranking nobody was warned about. 4b is the other half: the rival groups read
+  the same finished ranking the player's do, off the full chart rather than the
+  twenty-five rows `st.chart` keeps. Nothing in either step touches the books.
 - **3d reads the full chart, and `E.runAwards()` runs before `E.rollYear()`.** `st.chart`
   keeps twenty-five rows for one week and nothing else in the game remembers a chart ever
   happened, so `st.yearbook` is a live accumulator written while the data still exists —
@@ -112,6 +119,62 @@ planner's preview can never promise a number the release then undercuts. Keep it
 
 The rival chart is a persistent market (`st.market`) of ~22 decaying songs; player
 releases are merged into it in `buildChart()` and ranked together.
+
+### The rival agencies
+
+`st.rivals` is four named agencies with rosters, line-ups and a comeback diary, and they
+share the market rather than replacing it: **a rival agency's release is a market song
+with a `rid` on it.** Nothing else in the chart pipeline knows they exist — `tickMarket`
+decays it, the twelve-week window retires it, `buildChart` ranks it, and
+`accrueYearbook` files it under `r:NAME` like any other artist. `KP.rivalArtists`
+remains what it always was: names with nobody behind them.
+
+Five things hold that split together:
+
+- **A rival record stores only what changes.** The key, the roster, the diary — and it
+  looks its numbers up in `KP.rivalAgencies` through `KP.rivalSpec()`, the way a booking
+  stores a show key rather than a copy of the show. Rebalancing `pull` has to reach a
+  save already in progress. `KP.seedRivals()` builds *missing* agencies rather than
+  refusing when the array is non-empty, so a fifth name added to the data opens its
+  doors in every existing save.
+- **`E.rivalStrength()` is the single source of truth for what a rival release is
+  worth, and it has no roll in it** — the schedule board, the comeback planner and the
+  release itself all quote one number, the way `E.planPreview` and `E.livePreview` do.
+  It is deliberately the *same shape* as the player's own opening points
+  (`quality × .58 + hype × .42`), because the two are ranked against each other on one
+  chart: written as a sum of uncapped terms with multipliers on top, every established
+  rival sat on the 99 clamp within three years and every comeback became the same
+  unbeatable wall.
+- **A comeback plan exists from the moment the last one wrapped; visibility is what
+  changes.** `KP.rivalPlanVisible()` is the only gate — `announceLead` weeks out, or the
+  whole diary while a scouting report is live. A wall the player could not have known
+  about is not a decision they made badly, which is why the plan is stored rather than
+  rolled on the night.
+- **Rival people are `KP.makeTrainee()` output, on the player's own distribution**,
+  stripped by `KP.stripRivalPerson()` of the eight fields that only mean something to
+  somebody on the payroll. Competition drawn from a kinder distribution would be a cheat
+  the numbers could not show; sixty rival people carrying dead fields and full-precision
+  floats is a third of a save file, and `KP.save()` writes the whole state every week.
+- **An act has a contract and it runs out.** `g.retireAbs` is stamped the week the group
+  is formed and `KP.rivalCareer()` is the one derivation off it, read by the fade inside
+  `E.rivalStrength()`, by the retirement in `E.rivalWeek` and by the Rivals tab alike.
+  It is a *term*, not a performance test, and that is the whole point: measured over ten
+  years, 432 rival chart runs peaked between #3 and #16 — not one worse than #20 — on a
+  chart that is only 32–57 rows deep, so a rule that waits for an act to stop charting
+  waits forever. The first version did exactly that (`disbandQuiet`, "weeks outside the
+  top fifty"), never fired once in a decade, and the market silted up: every agency hit
+  `maxGroups` by year two and never debuted again, which quietly turned a poach into a
+  trainee the player watches sit in somebody else's building for the rest of the run.
+  Two rules keep the promise honest — nothing is booked past the term (`planComeback`
+  refuses, so an announced wall always arrives) and nobody retires mid-promotion, so no
+  song vanishes off a chart the player is competing on.
+
+Three loops keep the market from silting up, and all three are load-bearing rather than
+flavour: an agency at `maxGroups` stops auditioning, a **full roster still poaches** by
+letting its weakest go, and a contract ending frees the slot the next debut needs. Gating
+the poach on a free desk instead is what quietly ended that mechanic around year two —
+every roster reaches the cap and stays there, and the one thing that makes an audition
+decision hurt stops happening for the rest of the run.
 
 ### Save format
 
@@ -138,14 +201,23 @@ to change the state shape, and picking the wrong one breaks old files:
   point on, which is an honest degradation rather than a crash. The per-trainee
   `t.face` (`null`) went in the same way, with one wrinkle worth keeping: its back-fill
   is *derived* from `U.hue(t.id)`, not rolled, because a random default would hand the
-  same save a different roster of faces on every single load.
+  same save a different roster of faces on every single load. `st.rivals` (`[]`) is the
+  same idea one size up: an older file has no agencies and `KP.seedRivals()` builds them
+  on the way in, with every group stamped `debutY: 0` — established, never this year's
+  debutant, because handing an old save four free rookie contenders would decide a prize
+  it never watched being contested. The per-rival-group `g.retireAbs` follows `t.face`'s
+  rule for the same reason and adds one of its own: it is *derived* from `U.hue(g.id)` so
+  a file does not get a different set of farewells on every load, and it is floored at a
+  year out so opening a long-running save does not wind up its entire rival roster in the
+  week it is loaded.
 
 A record with two calendars on it, which nobody should tidy: on `g.releases[]`, **`y`/`w`
 mean the week promotions *wrapped*** (they always did, and 4–7 weeks after the fact),
-while **`releasedY`/`releasedW`/`releasedAbs` mean the week the song came *out***. Both are
-stored because a week-50 release wraps in the following year and would otherwise file its
-whole chart run under the wrong year's awards. Collapsing one into the other is a breaking
-change, not a clean-up.
+while **`releasedY`/`releasedW` mean the week the song came *out*** (`g.active` carries a
+third, `releasedAbs`, for as long as the release is live; archiving keeps the year and week
+and drops it). Both calendars are stored because a week-50 release wraps in the following
+year and would otherwise file its whole chart run under the wrong year's awards. Collapsing
+one into the other is a breaking change, not a clean-up.
 - **Breaking** (a field changes meaning, shape or units) → bump `SAVE_V` *and* add the
   matching rung to `KP.migrations`, where `migrations[n]` upgrades a `v=n` state to
   `v=n+1`. A missing rung is a hard, reported failure, never a silent pass.
@@ -214,6 +286,10 @@ anything that stretches the term (the miss branch) re-derives `weeksLeft` from
 - A prize is a data entry: `KP.awards.prizes` says what it is worth and
   `KP.awards.score[k]` is the weighted sum of the year's record that decides it, read
   generically by `ballotScore()` the way `KP.traits` is read by `traitMul()`.
+- A rival agency is a data entry: `KP.rivalAgencies` says who they are and how they
+  behave, `KP.rivals` holds the constants every one of them shares, and `KP.rivalSpec()`
+  is the only way state reaches either. Adding a fifth agency is one entry in `data.js`
+  and nothing else — including for saves already in progress.
 - A portrait is addressed by index, never by filename. `KP.faces.count` in `data.js` is
   the only number to touch when the pool grows and `KP.faces.src()` the only place a path
   is built; `count: 0` disables portraits and every avatar falls back to the gradient

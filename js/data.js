@@ -530,6 +530,96 @@ KP.rivalArtists = ['SEVENSTAR', 'IZ:UM', 'RE:VIVE', 'KARMA', 'GLOW UP', 'MIRAE7'
 KP.rivalDebutChance = .02;
 KP.rivalDebutActive = 1;   // years a debutant keeps releasing after its debut year
 
+/* ---------------------------- the agencies -------------------------------
+   KP.rivalArtists above is the market: names on a chart, nobody behind them.
+   These four are the buildings you actually compete with, and everything about
+   them is a thing you can watch happen — they sit in the same audition rooms,
+   sign the hopefuls you passed on, train them for years, debut them, and put a
+   comeback in the diary weeks before it lands on your chart week.
+
+   The knobs, and what each one is FOR:
+
+     gender    which auditions they attend and which portrait bucket their
+               people come from. Only agencies of the player's own gender are
+               in the room for a poach — a boy-group agency is not scouting the
+               girl group auditions — which is also what finally puts the male
+               half of the portrait pool on screen.
+     pull      multiplier on a release's opening points. This is prestige: what
+               the same line-up is worth once the producer, the label and the
+               distribution are behind it.
+     pace      weeks between one group's comebacks. The whole personality of an
+               agency is here: NEON9 is on your week because NEON9 is on every
+               week, and BLUEPRINT is dangerous twice a year.
+     maxGroups how many acts they can run at once.
+     fans0     the fandom of the group they already had when you opened.
+     recruit   weekly chance they bring in a hopeful of their own, so an agency
+               that never gets to poach from you still fills its building.
+     quality   the range they generate at — a major's audition room is better.
+
+   pull and pace pull against each other on purpose: the two agencies that hit
+   hardest are the two that show up least often, so a crowded week is rarely the
+   dangerous week and the dangerous week is easy to miss. */
+KP.rivalAgencies = [
+  { k: 'prism', name: 'PRISM MEDIA', kr: '프리즘 미디어', gender: 'f', color: '#B78CFF',
+    desc: 'The major. Three floors, a legal team, and a girl group that has never missed a year.',
+    pull: 1.16, pace: [20, 32], maxGroups: 3, fans0: 520e3, recruit: .10, quality: [.50, .92] },
+  { k: 'hanriver', name: 'HANRIVER ENT.', kr: '한강 엔터', gender: 'm', color: '#45E8FF',
+    desc: 'Boy groups, world tours, and a fandom that buys four copies of every album.',
+    pull: 1.07, pace: [15, 25], maxGroups: 3, fans0: 430e3, recruit: .12, quality: [.42, .86] },
+  { k: 'neon9', name: 'NEON9', kr: '네온나인', gender: 'f', color: '#FF2E86',
+    desc: 'Loud, fast, and always on the week you wanted. Quality is somebody else’s problem.',
+    pull: .93, pace: [10, 17], maxGroups: 2, fans0: 175e3, recruit: .15, quality: [.28, .70] },
+  { k: 'blueprint', name: 'BLUEPRINT LAB', kr: '블루프린트', gender: 'm', color: '#5BE7B0',
+    desc: 'A producer’s shop. One group, no schedule, and songs that win the year.',
+    pull: 1.24, pace: [26, 40], maxGroups: 1, fans0: 240e3, recruit: .07, quality: [.55, .95] }
+];
+
+/* Everything the four of them do, per week. A comeback plan exists from the
+   moment the last one wrapped — what changes is whether you can SEE it:
+   `announceLead` weeks out it becomes public, and a scouting report shows the
+   whole diary for `scoutWeeks`. That is the entire value of the report, and it
+   is why a plan is stored rather than rolled on the night: a wall you could not
+   have known about is not a decision you made badly. */
+KP.rivals = {
+  seedTrainees: [2, 4],    // hopefuls already in the building on week 1
+  rosterCap: 7,
+  trainRate: .40,          // stat points per week toward potential, × pull
+  memberRange: [4, 6],
+
+  poachChance: .55,        // per audition round, that somebody takes your leftovers
+  poachFloor: 58,          // ...and only for a ceiling worth a headline
+
+  debutReady: 4,           // trainees at debutOverall before they will debut at all
+  debutOverall: 44,
+  debutGap: 26,            // weeks between one agency's own debuts
+  debutFans: [35e3, 90e3],
+  firstGap: [7, 14],       // weeks from debut to the first comeback
+
+  announceLead: 4,         // weeks out a comeback becomes public knowledge
+  scoutCost: 60e6,
+  scoutWeeks: 26,
+
+  fanPerPoint: 46,         // fandom a charting week pays them, damped like yours
+  idleDecay: .996,
+
+  /* An act has a contract, and it runs out. This is the ONLY thing that frees a
+     group slot, so it is the only thing that keeps agency debuts happening — and
+     the reason it is a term rather than a performance test: measured over ten
+     years, no rival act ever stops charting (432 runs, every one peaking between
+     #3 and #16), so a rule that waits for one to go quiet waits forever. Every
+     agency hit maxGroups by year two and never debuted again, which quietly
+     turned the poach into a trainee the player watches sit in somebody else's
+     building for the rest of the run. Seven years is also what a real idol
+     contract is, so the fiction and the mechanic want the same number. */
+  contract: [6, 9],        // years from debut to the last comeback
+  seedContract: [3, 8],    // ...and what the four opening acts have left on theirs
+  fadeYears: 2.5,          // the tail of it, over which the act loses its edge
+  fadeFloor: .74,          // strength multiplier in the final week of the term
+  // What an unscouted comeback is called, since you are not shown the number.
+  wallBig: 76,
+  wallReal: 58
+};
+
 KP.titleWords = {
   a: ['Glass', 'Neon', 'Velvet', 'Cosmic', 'Bitter', 'Golden', 'Midnight', 'Paper', 'Silver',
     'Wild', 'Sugar', 'Crystal', 'Electric', 'Lonely', 'Scarlet', 'Static', 'Honey', 'Rebel'],
