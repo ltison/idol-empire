@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IDOL EMPIRE — K-Pop Agency Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;700;900&family=Plus+Jakarta+Sans:wght@400;500;600;800&family=JetBrains+Mono:wght@400;700&family=Noto+Sans+KR:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="aurora" aria-hidden="true"><span></span><span></span><span></span></div>
+
+<!-- ============ START SCREEN ============ -->
+<section id="screen-start" class="screen">
+  <div class="start-wrap">
+    <div class="start-mark">
+      <div class="start-kr">아이돌 제국</div>
+      <h1 class="start-title">IDOL<span>EMPIRE</span></h1>
+      <p class="start-sub">Sign the trainees. Build the group. Own the chart.</p>
+    </div>
+
+    <form id="form-newgame" class="start-form" autocomplete="off">
+      <label class="field">
+        <span class="field-label">Agency name</span>
+        <input id="in-company" type="text" maxlength="22" value="STARLINE" required>
+      </label>
+      <label class="field">
+        <span class="field-label">Your name (CEO)</span>
+        <input id="in-ceo" type="text" maxlength="22" value="Lukas" required>
+      </label>
+
+      <fieldset class="field">
+        <span class="field-label">Starting capital</span>
+        <div class="seg" id="seg-difficulty" role="radiogroup">
+          <button type="button" class="seg-btn is-on" data-diff="easy">
+            <b>Backed</b><i>₩30억 · investors believe</i>
+          </button>
+          <button type="button" class="seg-btn" data-diff="normal">
+            <b>Independent</b><i>₩20억 · standard run</i>
+          </button>
+          <button type="button" class="seg-btn" data-diff="hard">
+            <b>Basement</b><i>₩15억 · one shot only</i>
+          </button>
+        </div>
+      </fieldset>
+
+      <button class="btn btn-hero" type="submit">Open the agency</button>
+      <button class="btn btn-ghost" type="button" id="btn-continue" hidden>Continue saved run</button>
+    </form>
+  </div>
+</section>
+
+<!-- ============ GAME ============ -->
+<section id="screen-game" class="screen" hidden>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-logo" id="ui-logo">SL</div>
+      <div>
+        <div class="brand-name" id="ui-company">STARLINE</div>
+        <div class="brand-meta" id="ui-ceo">CEO —</div>
+      </div>
+    </div>
+
+    <div class="hud">
+      <div class="hud-cell">
+        <span class="hud-label">Week</span>
+        <span class="hud-val" id="ui-date">Y1 · W1</span>
+      </div>
+      <div class="hud-cell">
+        <span class="hud-label">Cash</span>
+        <span class="hud-val" id="ui-money">₩0</span>
+      </div>
+      <div class="hud-cell">
+        <span class="hud-label">Net / week</span>
+        <span class="hud-val" id="ui-burn">₩0</span>
+      </div>
+      <div class="hud-cell">
+        <span class="hud-label">Reputation</span>
+        <span class="hud-val" id="ui-rep">0</span>
+      </div>
+      <div class="hud-cell">
+        <span class="hud-label">Total fans</span>
+        <span class="hud-val" id="ui-fans">0</span>
+      </div>
+    </div>
+
+    <div class="topbar-actions">
+      <button class="btn btn-week" id="btn-week">Next week <kbd>N</kbd></button>
+      <button class="btn btn-icon" id="btn-menu" title="Menu">⋯</button>
+    </div>
+  </header>
+
+  <div class="shell">
+    <nav class="rail" id="nav">
+      <button class="rail-btn is-on" data-tab="dash"><span>◉</span>Office</button>
+      <button class="rail-btn" data-tab="trainees"><span>✦</span>Trainees<em id="badge-trainees"></em></button>
+      <button class="rail-btn" data-tab="scout"><span>⌕</span>Scouting<em id="badge-scout"></em></button>
+      <button class="rail-btn" data-tab="groups"><span>♪</span>Groups<em id="badge-groups"></em></button>
+      <button class="rail-btn" data-tab="chart"><span>▲</span>Chart</button>
+      <button class="rail-btn" data-tab="log"><span>≡</span>Feed</button>
+    </nav>
+
+    <main class="stage" id="stage"></main>
+  </div>
+</section>
+
+<div id="modal-root"></div>
+<div id="toasts" class="toasts"></div>
+
+<script src="js/data.js"></script>
+<script src="js/state.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
