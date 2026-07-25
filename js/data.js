@@ -115,7 +115,7 @@ KP.traits = [
   { k: 'choreomachine', name: 'Choreo Machine', desc: 'Dance training is 40% faster', train: { dance: 1.4 } },
   { k: 'wordsmith', name: 'Wordsmith', desc: 'Writes their own verses', train: { rap: 1.4 } },
   { k: 'camera', name: 'Camera Genius', desc: 'Visual grows fast, fancams go viral', train: { visual: 1.35 }, viral: 1.5 },
-  { k: 'moodmaker', name: 'Mood Maker', desc: 'Lifts the whole team\'s morale', morale: 2.2 },
+  { k: 'moodmaker', name: 'Mood Maker', desc: 'Lifts the whole team\'s morale', morale: 2.2, teamMorale: 1.4 },
   { k: 'ironlung', name: 'Iron Stamina', desc: 'Recovers stamina quickly', stamina: .65 },
   { k: 'ace', name: 'Ace', desc: 'Higher ceiling on everything', potential: 8 },
   { k: 'slowstart', name: 'Slow Starter', desc: 'Slow now, blooms after a year', train: { all: .75 }, late: true },

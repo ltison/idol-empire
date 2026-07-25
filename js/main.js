@@ -42,7 +42,7 @@
   });
 
   $('#btn-continue').addEventListener('click', () => {
-    if (KP.load()) { ui.tab = 'dash'; showGame(); }
+    if (KP.load()) { ui.tab = 'dash'; showGame(); if (KP.state.over) ui.gameOver(); }
     else ui.toast('That save could not be read.', 'bad');
   });
 
@@ -60,7 +60,8 @@
 
   function advanceWeek() {
     const st = KP.state;
-    if (!st || st.over) return;
+    if (!st) return;
+    if (st.over) return ui.gameOver();     // a finished run always says so, never just ignores you
     const recap = KP.engine.nextWeek() || [];
     ui.render();
     recap.slice(0, 3).forEach((r, i) =>
@@ -95,6 +96,14 @@
       const r = KP.engine.upgrade(KP.state, d.kind, d.key);
       if (!r.ok) return ui.toast(r.msg, 'bad');
       ui.render();
+    },
+
+    release(d) {
+      const t = KP.state.trainees.find(x => x.id === d.id);
+      const r = KP.engine.release(KP.state, d.id);
+      if (!r.ok) return ui.toast(r.msg || 'They cannot be released.', 'bad');
+      ui.render();
+      ui.toast((t ? t.name : 'They') + ' left the company.', '');
     },
 
     downgrade(d) {
@@ -188,7 +197,11 @@
 
   document.addEventListener('keydown', (e) => {
     if (e.target.tagName === 'INPUT' || $('#screen-game').hidden) return;
-    if (e.key === 'Escape') return ui.closeModal();
+    // a locked modal has no backdrop hook — Escape must not get past it either
+    if (e.key === 'Escape') {
+      if ($('#modal-root').children.length && !$('#modal-root').querySelector('[data-act="modal-bg"]')) return;
+      return ui.closeModal();
+    }
     if ($('#modal-root').children.length) return;
     if (e.key === 'n' || e.key === 'N') { e.preventDefault(); advanceWeek(); }
     const tabs = ['dash', 'trainees', 'scout', 'groups', 'chart', 'log'];

@@ -29,6 +29,7 @@
   /* Group strength for a concept: half the room's average, half its best member.
      A single monster vocalist genuinely carries a title track. */
   E.groupScore = function (members, conceptKey) {
+    if (!members || !members.length) return 0;      // 0/0 would poison money and fans with NaN
     const c = KP.concept(conceptKey);
     const keys = Object.keys(c.w);
     const total = keys.reduce((s, k) => s + c.w[k], 0);
@@ -172,11 +173,19 @@
     const gap = g.lastReleaseAbs == null ? 99 : abs - g.lastReleaseAbs;
     const fatigue = gap >= 16 ? 1 : .58 + .42 * (gap / 16);
 
-    const hype = U.clamp((visualPull * .42 + fanPull + repPull + promo.q + (mkt - 1) * 2.2 + g.momentum * .18)
-      * (.85 + trend / 320) * fresh * fatigue, 0, 100);
+    let buzz = 1;
+    members.forEach(m => { buzz *= traitMul(m, 'buzz'); });   // Variety Star finally earns its slot
 
-    const points = U.clamp(quality * .58 + hype * .42, 3, 99);
-    return { quality, hype, points, cost: E.planCost(sel), promo, trend, fatigue, gap };
+    const hype = U.clamp((visualPull * .42 + fanPull + repPull + promo.q + (mkt - 1) * 2.2 + g.momentum * .18)
+      * (.85 + trend / 320) * fresh * fatigue * buzz, 0, 100);
+
+    // First-ever release: nerves show on stage. Applied here, not at release time,
+    // so the preview cannot promise a number the release then quietly undercuts.
+    let debutMul = 1;
+    if (g.releases.length === 0) members.forEach(m => { debutMul *= traitMul(m, 'debutPenalty'); });
+
+    const points = U.clamp((quality * .58 + hype * .42) * debutMul, 3, 99);
+    return { quality, hype, points, cost: E.planCost(sel), promo, trend, fatigue, gap, debutMul };
   };
 
   E.releaseComeback = function (st, g, sel, conceptKey, title) {
@@ -184,11 +193,10 @@
     const upfront = pv.cost + KP.tiers.promo.find(x => x.k === sel.promo).cost;
     if (st.company.money < upfront) return { ok: false, msg: 'Not enough cash for this plan.' };
 
-    const members = KP.memberOf(st, g);
-    let penalty = 1;
-    members.forEach(m => { if (m.traits.includes('stagefright') && g.releases.length === 0) penalty *= .9; });
-
-    st.company.money -= pv.cost;
+    // Production plus the first promo week are paid now; weeklyBurn covers the rest.
+    // The final promo week clears g.active before step 5 bills, so without this
+    // prepayment the player would only ever be charged for promoWeeks − 1 weeks.
+    st.company.money -= pv.cost + pv.promo.cost;
     g.concept = conceptKey;
     g.lastConcept = conceptKey;
 
@@ -197,7 +205,7 @@
       concept: conceptKey,
       quality: pv.quality,
       hype: pv.hype,
-      basePoints: pv.points * penalty * U.rnd(.92, 1.1),
+      basePoints: pv.points * U.rnd(.92, 1.1),
       points: 0,
       week: 0,
       promoWeeks: pv.promo.weeks,
@@ -353,12 +361,26 @@
         if (U.chance(.35)) {
           // They walk. Contracts don't hold people who stopped believing.
           const wasIdol = !!t.groupId;
+          let disbanded = null;
           if (wasIdol) {
             const g = st.groups.find(x => x.id === t.groupId);
-            if (g) g.memberIds = g.memberIds.filter(id => id !== t.id);
+            if (g) {
+              g.memberIds = g.memberIds.filter(id => id !== t.id);
+              // A group with nobody left cannot promote, chart or be scored.
+              if (!g.memberIds.length) {
+                g.active = null;
+                st.groups = st.groups.filter(x => x.id !== g.id);
+                st.chart = (st.chart || []).filter(r => r.groupId !== g.id);
+                disbanded = g.name;
+              }
+            }
           }
           st.trainees = st.trainees.filter(x => x.id !== t.id);
           st.company.rep = U.clamp(st.company.rep - (wasIdol ? 5 : 1), 0, 100);
+          if (disbanded) {
+            KP.log(disbanded + ' has disbanded — nobody is left in the group.', 'bad');
+            return { ic: '💔', text: disbanded + ' disbanded — the last member walked', kind: 'bad' };
+          }
           return { ic: '🚪', text: t.name + ' terminated their contract and left', kind: 'bad' };
         }
         t.morale = U.clamp(t.morale + 12, 0, 100);
@@ -403,6 +425,9 @@
   function runEvents(st) {
     const pool = EVENTS.filter(e => e.need(st) && U.chance(e.p));
     U.pickN(pool, Math.min(2, pool.length)).forEach(e => {
+      // need() was evaluated for the whole pool up front; an earlier event this
+      // tick may have removed the very trainee or group this one is about.
+      if (!e.need(st)) return;
       const r = e.run(st);
       if (!r) return;
       KP.log(r.text, r.kind || 'info');
@@ -431,6 +456,13 @@
 
     // 2. training
     st.trainees.forEach(t => trainWeek(st, t));
+
+    // 2b. Mood Makers lift the room, not just themselves — the trait's own promise.
+    st.groups.forEach(g => {
+      const mates = KP.memberOf(st, g);
+      const lift = mates.reduce((s, m) => s + traitAdd(m, 'teamMorale'), 0);
+      if (lift > 0) mates.forEach(m => { m.morale = U.clamp(m.morale + lift, 0, 100); });
+    });
 
     // 3. market + chart
     tickMarket(st);
@@ -510,12 +542,15 @@
   E.debut = function (st, opts) {
     const members = opts.memberIds.map(id => st.trainees.find(t => t.id === id)).filter(Boolean);
     if (members.length < 3) return { ok: false, msg: 'A group needs at least 3 members.' };
+    // The wizard's disabled state is one render stale — validate where it is authoritative.
+    const name = String(opts.name || '').trim();
+    if (!name) return { ok: false, msg: 'Your group needs a name.' };
     if (st.company.money < KP.costs.debutShowcase) return { ok: false, msg: 'A debut showcase costs ' + U.money(KP.costs.debutShowcase) + '.' };
 
     st.company.money -= KP.costs.debutShowcase;
     const g = {
       id: U.uid('g'),
-      name: opts.name,
+      name: name,
       kr: opts.kr || '',
       concept: opts.concept,
       lastConcept: null,

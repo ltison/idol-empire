@@ -74,7 +74,9 @@
         ? `<div class="chip hot">Injured · ${t.statusWeeks}w left</div>`
         : group
           ? `<div class="row"><span class="chip cool">${U.esc(group.name)}</span><span class="chip">${U.esc(t.position || '')}</span></div>${focusGrid(t)}`
-          : focusGrid(t);
+          : focusGrid(t) + `<div class="row" style="margin-top:8px"><span class="spacer"></span>
+              <button class="btn btn-sm btn-cut" data-act="release" data-id="${t.id}"
+                title="Tear up the contract — no refund">Release</button></div>`;
     } else if (mode === 'scout') {
       footer = `<div class="row">
         <button class="btn btn-sm btn-primary" data-act="sign" data-id="${t.id}">Sign · ${U.money(t.signCost)}</button>
@@ -409,8 +411,11 @@
 
   ui.closeModal = function () { $('#modal-root').innerHTML = ''; };
 
-  ui.modal = function (html) {
-    $('#modal-root').innerHTML = `<div class="modal-bg" data-act="modal-bg"><div class="modal">${html}</div></div>`;
+  /* opts.locked drops the backdrop's dismiss hook — used for the end of a run,
+     which must not be clickable-away into a dead, still-interactive game. */
+  ui.modal = function (html, opts) {
+    const dismiss = opts && opts.locked ? '' : ' data-act="modal-bg"';
+    $('#modal-root').innerHTML = `<div class="modal-bg"${dismiss}><div class="modal">${html}</div></div>`;
   };
 
   ui.toast = function (text, kind) {
@@ -598,7 +603,7 @@
 
       <div class="modal-foot">
         <span class="tiny ${afford ? 'muted' : 'neg'}">
-          ${afford ? 'Production is paid now; promo is billed weekly.' : 'Not enough cash for production plus the first promo week.'}
+          ${afford ? 'Production and the first promo week are paid now; the rest is billed weekly.' : 'Not enough cash for production plus the first promo week.'}
         </span>
         <span class="spacer"></span>
         <button class="btn" data-act="modal-close">Cancel</button>
@@ -638,6 +643,6 @@
         <div><b class="gold">${st.stats.no1}</b><span>#1 singles</span></div>
       </div>
       <div class="modal-foot"><span class="spacer"></span>
-        <button class="btn btn-primary" data-act="menu-quit">Start over</button></div>`);
+        <button class="btn btn-primary" data-act="menu-quit">Start over</button></div>`, { locked: true });
   };
 })();
