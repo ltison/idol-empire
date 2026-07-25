@@ -28,7 +28,7 @@ a message rather than half-loaded.
 | Key | Action |
 |---|---|
 | `N` | Advance one week |
-| `1`–`6` | Jump to Office / Trainees / Scouting / Groups / Chart / Feed |
+| `1`–`7` | Jump to Office / Trainees / Scouting / Groups / Schedule / Chart / Feed |
 | `Esc` | Close a dialog |
 
 ---
@@ -89,12 +89,97 @@ The full loop is playable: audition → train → debut → comeback → chart �
   glowing lights in the group's own colour
 - Responsive to mobile, keyboard-navigable, `prefers-reduced-motion` respected
 
-## Backlog — what the next sprints add
+## Sprint 2 — shipped
 
-**Sprint 2 — the calendar year**
-Year-end awards (daesang, rookie of the year), seasonal chart pressure, music show
-appearances as a schedule you book rather than an abstraction, variety show bookings,
-fan meets and concerts as explicit revenue events, a proper loan/investor system.
+The run used to be an endless queue of weeks. Now it is a **year**: it has seasons that
+change what charting is worth, a diary you fill in yourself, and an ending in December.
+
+**The calendar**
+- 52 weeks to a year, six named seasons — New Year quiet, spring comebacks, the mid-year
+  lull, summer songs, fall comebacks, award season — each with its own rival strength,
+  audience multiplier, stage capacity and set of concepts the public currently wants
+- Concept trends are pulled toward what the season favours instead of drifting freely, so
+  the fashionable concept is a moving target you can plan a comeback around
+- The season that pays best is the season you are least likely to win, and the dead weeks
+  you could dominate are the weeks nobody is spending. Both are shown as numbers
+- Everything that measures a distance in time works in absolute weeks, so cooldowns and
+  bookings survive a year boundary
+
+**The schedule** — a fifth tab, and the biggest change to how a week is played
+- A board of the next 8 weeks, one row per group per week. Every appearance is booked
+  ahead, paid **in full at the moment you book it**, and resolved on its week — so a diary
+  never quietly changes the runway. What it costs afterwards is stamina
+- Three music shows (cable / network / broadcast special). A stage is performed *before*
+  the week's chart is counted, so the points land on this ranking rather than the next one
+- Four variety shows, pitched at a `variety` level and graded on whoever is funniest in the
+  room: went viral / went well / fell flat. A booking is also a lesson — the whole cast
+  picks up variety, which is the only way a stiff line-up ever learns to be entertaining
+- Slots are finite: a show's capacity shifts with the season and the rivals on the bill
+  take their share, deterministically, so a one-slot flagship can vanish for weeks at a time
+- Cancelling more than two weeks out returns half the fee. Inside that window the slot is
+  already printed in somebody else's schedule: nothing back, and it costs goodwill
+- Book somebody with nothing left and they get injured. Book a group with nobody fit and
+  the appearance is missed in public
+- Every figure in the booking modal is the figure the week will actually credit. New fans
+  are damped where they are quoted, not only where they are paid, and a show is quoted for
+  *its* week rather than for today — a live booked past the last week of promotions is
+  priced as the cold house it will be, which is the difference between a decision and a sales
+  pitch
+
+**Live shows** — the first thing on the board meant to make money
+- Fan meeting → solo concert → arena → dome, unlocked by fandom, prepaid as a production
+  budget, and paid back by ticket sales. The only booking that can come in under cost
+- Attendance is fandom × the venue's pull × a stack of things you can move before show
+  night: an active comeback, momentum, standing, how long since anybody heard from them,
+  and the week of the year. The modal shows break-even, the attendance band, the gate and
+  a plain verdict — safe, a risk, or do not book it
+- A newly unlocked venue *loses money* until something else is going right. Sold-out nights
+  pay reputation and momentum; empty seats get photographed
+- Cooldowns per tier, plus three weeks between any two shows by the same group
+
+**Year-end awards**
+- Eight prizes: the daesang, Album and Song of the Year, Rookie of the Year, Popularity,
+  Best Performance, Entertainer of the Year, and five bonsangs
+- Scored from a **yearbook** accrued every week from the full ranked chart, because nothing
+  else in the game remembers that a chart ever happened. Credit is rank-weighted over the
+  top 50, so a week at #1 is worth fifty weeks at the bottom of the ladder
+- Each prize is a weighted sum over a different set of axes, so eight prizes are eight
+  different awards: Album of the Year is mostly sales, Best Performance is mostly stages
+  booked, Entertainer is who you sent to variety, and Rookie drops sales entirely so a
+  first-year group can take it on chart points alone
+- Rivals keep no books, so theirs are synthesised from their chart record at a rate
+  measured against *your* year — a market act with an unbounded fandom to compare against
+  is the difference between a ceremony and a formality
+- The market produces genuine debutants from the second year on, so the rookie race has
+  somebody in it besides your own new group
+- Awards pay no cash, because award shows never do. They pay reputation, fandom, momentum
+  and **prestige** — permanent standing that gates producers, broadcasters, venues and
+  credit for the rest of the run. A trophy is spent on next year's board
+- The running ballot is on the office wall from week one: an award you cannot see coming is
+  an award you cannot chase. The ceremony itself is a modal on the night, and every year is
+  kept on the chart tab
+
+**Money you do not have**
+- Three loans and three investor deals, with opposite risk shapes. A loan is a fixed weekly
+  instalment billed in the books — cheap whether you win or lose, and it does not care
+  which. An investor takes no instalment at all and a share of every won you earn, at
+  source: free if you fail, ruinous if you succeed
+- A credit limit priced off real collateral (the building, the fandom, your standing), shown
+  as a line you have drawn against
+- Clearing a loan early forgives half the interest you have not been charged yet; buying an
+  investor out costs a fixed multiple of the principal, less whatever they have already taken
+- Missing an instalment starts a ladder: a capitalised penalty and lost reputation, then a
+  rate hike, then an asset seized with no refund, then the run ends in the hands of your
+  creditors — a second, different way to lose. The payment itself bounces back into the
+  balance, so what a miss costs is the penalty, the stretched term and the goodwill, never
+  the instalment on top of all three
+- The balance owed and the weekly bill are one loan seen twice: the last week bills what is
+  left rather than a round instalment, and a loan whose balance is clear stops billing —
+  there is no week where the HUD says ₩0 and the books still take money
+- The free emergency investor that used to appear as an event is gone. A lender now just
+  calls to remind you what you could still raise, which made borrowing a decision
+
+## Backlog — what the next sprints add
 
 **Sprint 3 — rivals with faces**
 Rival agencies that sign the trainees you passed on, debut competing groups, and steal

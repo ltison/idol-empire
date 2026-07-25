@@ -42,8 +42,11 @@
   });
 
   $('#btn-continue').addEventListener('click', () => {
-    if (KP.load()) { ui.tab = 'dash'; showGame(); if (KP.state.over) ui.gameOver(); }
-    else ui.toast('That save could not be read.', 'bad');
+    if (!KP.load()) return ui.toast('That save could not be read.', 'bad');
+    ui.tab = 'dash';
+    showGame();
+    if (KP.state.over) return ui.gameOver();
+    showPendingAwards();
   });
 
   /* ------------------------------ save files ------------------------------- */
@@ -84,7 +87,8 @@
       ui.toast(r.migrated
         ? 'Save imported and upgraded from format v' + r.from + '.'
         : 'Save imported — ' + KP.state.company.name + ', Y' + KP.state.year + ' W' + KP.state.week + '.', 'good');
-      if (KP.state.over) ui.gameOver();
+      if (KP.state.over) return ui.gameOver();
+      showPendingAwards();
     };
     reader.onerror = () => ui.toast('That file could not be read.', 'bad');
     reader.readAsText(file);
@@ -110,9 +114,25 @@
     if (st.over) return ui.gameOver();     // a finished run always says so, never just ignores you
     const recap = KP.engine.nextWeek() || [];
     ui.render();
+    // There is one modal root, so the three things that want it are ranked: a
+    // dead run outranks a ceremony, and a ceremony outranks the weekly toasts.
+    if (st.over) return ui.gameOver();
+    const awardYear = KP.engine.claimAwards(st);
+    // Saved before it is shown, so a closed tab cannot make it happen twice.
+    if (awardYear != null) { KP.save(); return ui.openAwards(awardYear); }
     recap.slice(0, 3).forEach((r, i) =>
       setTimeout(() => ui.toast(r.ic + '  ' + r.text, r.kind), i * 220));
-    if (st.over) ui.gameOver();
+  }
+
+  /* A ceremony interrupted by a closed tab is still owed to the player, exactly
+     once — both ways back into a run go through here. */
+  function showPendingAwards() {
+    const st = KP.state;
+    if (!st || st.over) return;
+    const y = KP.engine.claimAwards(st);
+    if (y == null) return;
+    KP.save();
+    ui.openAwards(y);
   }
 
   /* ---------------------------- action routing ----------------------------- */
@@ -131,10 +151,8 @@
     },
 
     'refresh-scouts'() {
-      const st = KP.state;
-      if (st.company.money < KP.costs.scoutRefresh) return ui.toast('Not enough cash.', 'bad');
-      st.company.money -= KP.costs.scoutRefresh;
-      KP.refreshScouts();
+      const r = KP.engine.refreshScoutsPaid(KP.state);
+      if (!r.ok) return ui.toast(r.msg, 'bad');
       ui.render();
     },
 
@@ -161,6 +179,49 @@
 
     'open-debut'() { ui.openDebut(); },
     'open-comeback'(d) { ui.openComeback(d.id); },
+
+    /* ---- the schedule ---- */
+    'open-booking'(d) { ui.openBooking(d.gid, parseInt(d.abs, 10)); },
+    'book-kind'(d) { ui.book.kind = d.key; ui.book.show = null; ui.drawBooking(); },
+    'book-show'(d) { ui.book.show = d.key; ui.drawBooking(); },
+    'book-confirm'() {
+      const b = ui.book;
+      const r = KP.engine.book(KP.state, b.gid, b.kind, b.show, b.abs);
+      if (!r.ok) return ui.toast(r.msg, 'bad');
+      ui.closeModal();
+      ui.tab = 'sched';
+      ui.render();
+      KP.save();                    // a paid commitment must survive a closed tab
+      ui.toast('Booked.', 'good');
+    },
+    'book-cancel'(d) {
+      const r = KP.engine.cancelBooking(KP.state, d.id);
+      if (!r.ok) return ui.toast(r.msg, 'bad');
+      ui.render();
+      KP.save();
+      ui.toast(r.late ? 'Pulled out at short notice — reputation took the hit.'
+        : 'Cancelled · ' + U.money(r.back) + ' recovered.', r.late ? 'bad' : '');
+    },
+
+    /* ---- finance ---- */
+    'open-finance'() { ui.openFinance(); },
+    'fin-mode'(d) { ui.fin.mode = d.key; ui.fin.pick = null; ui.drawFinance(); },
+    'fin-pick'(d) { ui.fin.pick = d.key; ui.drawFinance(); },
+    'fin-take'(d) {
+      const r = KP.engine.takeDebt(KP.state, ui.fin.mode, d.key);
+      if (!r.ok) return ui.toast(r.msg, 'bad');
+      ui.closeModal();
+      ui.render();
+      KP.save();                    // signed money must survive a closed tab
+      ui.toast(U.money(r.net) + ' received.', 'big');
+    },
+    'fin-clear'(d) {
+      const r = KP.engine.repayDebt(KP.state, d.id);
+      if (!r.ok) return ui.toast(r.msg, 'bad');
+      ui.render();
+      KP.save();
+      ui.toast('Cleared for ' + U.money(r.paid) + '.', 'good');
+    },
 
     /* ---- debut wizard ---- */
     'wiz-pick'(d) {
@@ -252,7 +313,8 @@
     }
     if ($('#modal-root').children.length) return;
     if (e.key === 'n' || e.key === 'N') { e.preventDefault(); advanceWeek(); }
-    const tabs = ['dash', 'trainees', 'scout', 'groups', 'chart', 'log'];
+    // Same order as the .rail-btn list in index.html and ui.js's views map.
+    const tabs = ['dash', 'trainees', 'scout', 'groups', 'sched', 'chart', 'log'];
     const i = parseInt(e.key, 10);
     if (i >= 1 && i <= tabs.length) { ui.tab = tabs[i - 1]; ui.render(); }
   });

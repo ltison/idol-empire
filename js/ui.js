@@ -118,13 +118,20 @@
   function ledger(st) {
     const L = KP.ledger(st);
     const rows = [
-      ['in', 'Merch & fan meets', L.in.merch, U.num(KP.totalFans(st)) + ' fans × ₩' + KP.income.merchPerFan],
-      ['in', 'Session work & extras', L.in.side, 'base + reputation'],
+      ['in', 'Merch & goods', L.in.merch, U.num(KP.totalFans(st)) + ' fans × ₩' + KP.income.merchPerFan],
+      ['in', 'Session work & extras', L.in.side, 'base + standing'],
       ['out', 'Trainees', L.out.trainees, st.trainees.filter(t => !t.groupId).length + ' unsigned to a group'],
       ['out', 'Idol pay', L.out.idols, 'scales with fame'],
       ['out', 'Facilities', L.out.facilities, 'practice · studio · dorm'],
       ['out', 'Staff', L.out.staff, 'coaches · producer · marketing'],
-      ['out', 'Promotion', L.out.promo, 'active campaigns']
+      ['out', 'Promotion', L.out.promo, 'active campaigns'],
+      ['out', 'Debt service', L.out.debt, 'principal + interest'],
+      // Not billed here — E.earn already took it. Shown because a line the
+      // player cannot see is a line that lies.
+      // ...and the note says merch rather than "the top line" because that is
+      // what the amount is: the ledger models the recurring week, and album,
+      // stream and gate money are episodic and not in it either.
+      ['out', 'Investor share', L.share, Math.round(L.shareRate * 100) + '% of the merch line']
     ].filter(r => r[2] > 0);
 
     return `<div class="ledger">
@@ -139,14 +146,120 @@
     </div>`;
   }
 
+  /* Borrowed money, and what it is doing to the books. Deliberately unglamorous:
+     no gold, no primary button, no bar that fills up like an achievement. */
+  function financeCard(st) {
+    const F = KP.finance;
+    const L = KP.ledger(st);
+    const debts = st.company.debts;
+    const owed = KP.debtOutstanding(st);
+    const limit = KP.creditLimit(st);
+    const full = debts.length >= F.maxFacilities;
+
+    const rows = debts.length ? `<div class="ledger">${debts.map(d => {
+      const note = d.missed
+        ? d.missed + ' missed of ' + F.defaultAtMiss + ' · penalties added'
+        : d.type === 'loan' ? U.money(d.weekly) + ' every week'
+          : Math.round(d.share * 100) + '% of the top line · ' + U.money(d.paid) + ' taken';
+      return `<div class="led-row">
+        <span class="led-label">${U.esc(d.name)}<i class="${d.missed ? 'neg' : ''}">${d.weeksLeft}w left · ${note}</i></span>
+        <button class="btn btn-sm" data-act="fin-clear" data-id="${d.id}"
+          title="${d.type === 'loan' ? 'Settle it now — half the interest you have not been charged yet is forgiven'
+        : 'Buy their share back at ' + F.buyoutMul + '× the principal, less what they have already taken'}">Clear
+          · ${U.money(KP.engine.payoffCost(d))}</button>
+      </div>`;
+    }).join('')}</div>`
+      : `<p class="tiny muted" style="margin:6px 0 0">Nothing owed. Every won in the building is yours.</p>`;
+
+    return `<div class="card">
+      <div class="sec-head"><h2>Finance</h2><span class="kr">자금</span>
+        <p>${debts.length} of ${F.maxFacilities} facilities open</p></div>
+      <div class="kv" style="margin-top:0">
+        <div><b class="${owed > 0 ? 'neg' : ''}">${U.money(owed)}</b><span>Debt</span></div>
+        <div><b class="${L.out.debt > 0 ? 'neg' : ''}">${U.money(L.out.debt)}</b><span>Weekly service</span></div>
+        <div><b class="${L.shareRate > 0 ? 'neg' : ''}">${Math.round(L.shareRate * 100)}%</b><span>Investor share</span></div>
+        <div><b class="pos">${U.money(KP.creditFree(st))}</b><span>Credit free</span></div>
+      </div>
+      <!-- calm, not the pink duotone: a line filling up is not an achievement -->
+      <div class="bar calm"><u style="width:${Math.min(100, limit > 0 ? owed / limit * 100 : 0).toFixed(1)}%"></u></div>
+      <p class="tiny muted" style="margin:8px 0 0">${U.money(owed)} drawn against a ${U.money(limit)} line —
+        ${U.money(F.baseCredit)} to start with, then half the list price of every facility and staff level above base,
+        ₩${F.fanCollateral} per fan and ${U.money(F.standingCollateral)} per point of standing.</p>
+      ${rows}
+      <div class="row" style="margin-top:14px">
+        <button class="btn" data-act="open-finance" ${full ? 'disabled' : ''}>Raise money</button>
+        <span class="tiny muted">${full
+        ? 'No lender will be the third name on your books.'
+        : 'A loan is cheap whether you win or lose. An investor is free if you fail and ruinous if you succeed.'}</span>
+      </div>
+    </div>`;
+  }
+
+  /* The year has a shape, so it gets a picture: six blocks sized by length, a
+     needle on this week, and the numbers the season is currently pushing. */
+  function seasonCard(st) {
+    const s = KP.seasonNow(st);
+    const left = s.w2 - st.week + 1;
+    const next = KP.seasons[(KP.seasons.indexOf(s) + 1) % KP.seasons.length];
+    const favours = s.favours.map(k => KP.concept(k).name).join(' · ');
+
+    // The running ballot. The ceremony is a whole year away when you start
+    // filling it in, so the numbers it will be read from are on the wall from
+    // week one rather than announced on the night.
+    const y = KP.yearTotals(st);
+    const A = KP.awards;
+    const board = !st.groups.length ? '' : `
+      <span class="eyebrow" style="display:block;margin:18px 0 -4px">Year ${st.year} so far · what the ceremony reads</span>
+      <div class="kv" style="margin-bottom:0">
+        <div><b>${U.num(y.cp)}</b><span>Chart points</span></div>
+        <div><b class="${y.no1 ? 'gold' : ''}">${y.no1}</b><span>Weeks at #1</span></div>
+        <div><b>${U.num(y.sales)}</b><span>Albums sold</span></div>
+        <div><b>${y.stages}</b><span>Stages</span></div>
+        <div><b>${y.variety}</b><span>Variety</span></div>
+        <div><b>${U.num(y.tickets)}</b><span>Tickets</span></div>
+      </div>
+      <p class="tiny muted" style="margin:10px 0 0">Chart points are rank-weighted over the top ${A.chartDepth}:
+        a week at #1 is worth ${A.chartDepth}, a week at #${A.chartDepth} is worth 1, and ${A.minBallot} of them is the
+        minimum to be on any ballot at all. Stages carry Best Performance, variety appearances carry Entertainer of the
+        Year, and the daesang wants all of it plus the sales.</p>`;
+
+    return `<div class="card">
+      <div class="sec-head">
+        <h2>${U.esc(s.name)}</h2><span class="kr">${U.esc(s.kr)}</span>
+        <p>Week ${st.week} of ${KP.WEEKS_PER_YEAR} · ${left} week${left === 1 ? '' : 's'} of it left</p>
+        <span class="spacer"></span>
+        <span class="chip">Next · ${U.esc(next.name)} · W${next.w1}</span>
+      </div>
+      <p class="tiny muted" style="margin:-6px 0 12px">${U.esc(s.desc)}. The public wants ${U.esc(favours)}.</p>
+      <div class="season-strip">
+        ${KP.seasons.map(x => `<div class="season-seg ${x.k === s.k ? 'is-on' : ''}" style="flex:${x.w2 - x.w1 + 1}"
+          title="W${x.w1}–W${x.w2} · ${U.esc(x.name)}"><b>${U.esc(x.kr)}</b></div>`).join('')}
+        <i style="left:${((st.week - .5) / KP.WEEKS_PER_YEAR * 100).toFixed(2)}%"></i>
+      </div>
+      <div class="kv" style="margin-bottom:0">
+        <div><b class="${s.field > 1 ? 'neg' : 'pos'}">×${s.field.toFixed(2)}</b><span>Rival strength</span></div>
+        <div><b class="${s.audience < 1 ? 'neg' : 'pos'}">×${s.audience.toFixed(2)}</b><span>Audience</span></div>
+        <div><b class="${s.slotBonus > 0 ? 'pos' : s.slotBonus < 0 ? 'neg' : ''}">${s.slotBonus > 0 ? '+' + s.slotBonus : s.slotBonus < 0 ? s.slotBonus : '—'}</b><span>Stage slots</span></div>
+        <div><b>${KP.WEEKS_PER_YEAR - st.week}</b><span>Weeks to year end</span></div>
+      </div>
+      <p class="tiny muted" style="margin:12px 0 0">Rival strength is what it takes to chart; audience is a straight
+        multiplier on streaming revenue; stage slots shift what the broadcasters have room for. The season that pays best
+        is the season you are least likely to win — and the one with the fewest stages to book — while the dead weeks you
+        can dominate are the weeks nobody is spending.</p>
+      ${board}
+    </div>`;
+  }
+
   /* ================================ screens ================================ */
 
   function officeTab(st) {
     const c = st.company;
-    const burn = KP.weeklyBurn(st);
-    const misc = KP.weeklyMisc(st) + st.groups.reduce((s, g) => s + g.fans * KP.income.merchPerFan, 0);
-    const net = burn - misc;
-    const runway = net > 0 ? Math.floor((c.money - KP.costs.bankruptcyFloor) / net) : 99;
+    // One derivation, read three ways. The investor share is not billed in step 5
+    // but it does leave the building, so the displayed cost has to include it.
+    const L = KP.ledger(st);
+    const burn = L.totalOut + L.share;
+    const misc = L.totalIn;
+    const runway = L.net < 0 ? Math.floor((c.money - KP.costs.bankruptcyFloor) / -L.net) : 99;
     const active = st.groups.filter(g => g.active);
 
     const recap = st.recap.length
@@ -199,21 +312,25 @@
       </div>`;
     }).join('');
 
+    const favours = KP.seasonNow(st).favours;
     const trendRows = KP.concepts.slice()
       .sort((a, b) => st.trends[b.k] - st.trends[a.k]).slice(0, 5)
       .map(cc => `<div class="trend">
-        <span class="nm">${cc.name}<em>${cc.kr}</em></span>
+        <span class="nm">${cc.name}<em>${cc.kr}</em>${favours.indexOf(cc.k) >= 0
+        ? '<span class="chip cool" style="margin-left:7px">in season</span>' : ''}</span>
         <i>${Math.round(st.trends[cc.k])}</i>
         <div class="bar calm"><u style="width:${st.trends[cc.k]}%"></u></div>
       </div>`).join('');
 
     return `
     <div class="dash-hero">
-      <div class="kr">${st.calendarYear}년 ${st.week}주차</div>
+      <div class="kr">${st.calendarYear}년 ${st.week}주차 · ${U.esc(KP.seasonNow(st).kr)}</div>
       <h2>Year ${st.year}, Week ${st.week}</h2>
       <p class="muted" style="margin:8px 0 0">${U.esc(c.ceo)} · ${U.esc(c.name)} · ${KP.difficulties[c.difficulty].label} run</p>
       <div class="recap" style="margin-top:16px">${recap}</div>
     </div>
+
+    <div style="margin-top:16px">${seasonCard(st)}</div>
 
     ${promoCards ? `<div class="grid g-2" style="margin-top:16px">${promoCards}</div>` : ''}
 
@@ -226,10 +343,14 @@
           <div><b class="pos">${U.money(misc)}</b><span>Weekly income</span></div>
           <div><b class="${runway < 8 ? 'neg' : ''}">${runway > 90 ? '∞' : runway + 'w'}</b><span>Runway</span></div>
           <div><b>${Math.round(c.rep)}</b><span>Reputation</span></div>
+          ${c.prestige ? `<div><b>${Math.round(KP.standing(st))}</b><span>Standing</span></div>` : ''}
         </div>
         <div class="bar" style="margin-top:6px"><u style="width:${c.rep}%"></u></div>
         ${ledger(st)}
-        <p class="tiny muted" style="margin:10px 0 0">Runway ignores release revenue — a comeback is how you actually get paid. Reputation unlocks star producers and better auditions.</p>
+        <p class="tiny muted" style="margin:10px 0 0">Runway ignores release revenue — a comeback is how you actually get paid.
+          ${c.prestige
+        ? 'Standing is reputation plus the ' + c.prestige + ' prestige your trophies left behind, and standing is what every gate reads.'
+        : 'Reputation unlocks star producers and better auditions; trophies add permanent prestige on top of it.'}</p>
       </div>
 
       <div class="card">
@@ -248,9 +369,13 @@
         <div class="sec-head"><h2>Build out</h2><span class="kr">투자</span></div>
         <div class="opt-list">${facRows}</div>
       </div>
+      ${financeCard(st)}
+    </div>
+
+    <div style="margin-top:16px">
       <div class="card">
         <div class="sec-head"><h2>What's trending</h2><span class="kr">트렌드</span></div>
-        <p class="tiny muted" style="margin:-6px 0 12px">Concepts the public is hungry for right now. Riding a trend raises hype; repeating your own last concept lowers it.</p>
+        <p class="tiny muted" style="margin:-6px 0 12px">Concepts the public is hungry for right now. Riding a trend raises hype; repeating your own last concept lowers it. The season pulls its own concepts up and lets the rest settle back.</p>
         ${trendRows}
       </div>
     </div>`;
@@ -282,7 +407,7 @@
   function scoutTab(st) {
     const head = `<div class="sec-head">
       <h2>Auditions</h2><span class="kr">오디션</span>
-      <p>Reputation ${Math.round(st.company.rep)} — better applicants show up as you grow</p>
+      <p>Standing ${Math.round(KP.standing(st))} (reputation ${Math.round(st.company.rep)}) — better applicants show up as you grow</p>
       <span class="spacer"></span>
       <button class="btn" data-act="refresh-scouts">New round · ${U.money(KP.costs.scoutRefresh)}</button>
     </div>`;
@@ -327,12 +452,18 @@
           ${g.active ? `<span class="chip hot">Promoting</span>` : `<span class="chip">Resting</span>`}
         </div>
 
+        ${(g.trophies || []).length ? `<div class="row" style="margin-bottom:10px">${g.trophies.slice(0, 6).map(t =>
+        `<span class="chip win" title="Year ${t.y} · ${U.esc(t.name)}">${U.esc(t.ic)} Y${t.y}</span>`).join('')}
+        ${g.trophies.length > 6 ? `<span class="tiny muted">+${g.trophies.length - 6} more</span>` : ''}</div>` : ''}
+
         <div class="member-strip">${strip}</div>
 
         <div class="kv">
           <div><b>${U.num(g.fans)}</b><span>Fans</span></div>
           <div><b>${Math.round(g.momentum)}</b><span>Momentum</span></div>
           <div><b>${g.releases.length}</b><span>Releases</span></div>
+          <div><b>${g.stagesY}</b><span>Stages this year</span></div>
+          <div><b>${U.num(g.ticketsY)}</b><span>Tickets this year</span></div>
           <div><b class="gold">${g.releases.reduce((s, r) => s + r.wins, 0)}</b><span>Wins</span></div>
         </div>
 
@@ -343,6 +474,7 @@
           <button class="btn btn-primary" data-act="open-comeback" data-id="${g.id}" ${g.active ? 'disabled' : ''}>
             ${g.releases.length ? 'Plan comeback' : 'Plan debut single'}
           </button>
+          <button class="btn" data-act="open-booking" data-gid="${g.id}" data-abs="${KP.absWeek(st) + 1}">Book a schedule</button>
           ${g.active ? `<span class="tiny muted">Promotions end in ${g.active.promoWeeks - g.active.week} weeks</span>` : ''}
         </div>
       </article>`;
@@ -351,18 +483,120 @@
     return head + `<div class="grid g-2">${cards}</div>`;
   }
 
+  /* The week board. One card per upcoming week, one row per group, every booking
+     a chip you can pull back out of — at a price, if the week is close. */
+  function schedTab(st) {
+    const B = KP.bookings;
+    const now = KP.absWeek(st);
+    const prepaid = st.bookings.reduce((s, b) => s + b.fee, 0);
+
+    const head = `<div class="sec-head"><h2>Schedule</h2><span class="kr">스케줄</span>
+      <p>${st.bookings.length} appearance${st.bookings.length === 1 ? '' : 's'} booked · ${B.weeksAhead} weeks ahead</p></div>`;
+
+    if (!st.groups.length) {
+      return head + `<div class="empty"><b>Nobody to book</b>Debut a group and the broadcasters will start taking your calls.</div>`;
+    }
+
+    // A live is booked against the fandom it will have on the night, and a group
+    // can lose fans between the two. A show that has slipped under break-even
+    // since it was paid for is the one thing on this board worth interrupting for.
+    const lives = st.bookings.filter(b => b.kind === 'live').map(b => {
+      const g = st.groups.find(x => x.id === b.groupId);
+      return { b, g, pv: g ? KP.engine.livePreview(st, g, b.show, b.absWeek) : null };
+    });
+    const production = lives.reduce((s, x) => s + x.b.fee, 0);
+    const doomed = lives.filter(x => x.pv && x.pv.doomed).map(x =>
+      `<p class="tiny neg" style="margin:6px 0 0">⚠ ${U.esc(KP.engine.weekLabel(st, x.b.absWeek))}:
+        ${U.esc(x.g.name)}'s fandom has slipped below break-even for the booked
+        ${U.esc(x.pv.v.name)} — ${U.num(x.pv.hi)} seats at best against ${U.num(x.pv.breakEven)} needed.</p>`).join('');
+
+    const summary = `<div class="card">
+      <div class="kv" style="margin:0">
+        <div><b class="${prepaid > 0 ? 'neg' : ''}">${U.money(prepaid)}</b><span>Prepaid</span></div>
+        <div><b class="${production > 0 ? 'neg' : ''}">${U.money(production)}</b><span>Of it, production</span></div>
+        <div><b>${st.bookings.length}</b><span>Booked</span></div>
+        <div><b>${st.groups.reduce((s, g) => s + g.stagesY, 0)}</b><span>Stages this year</span></div>
+        <div><b>${st.groups.reduce((s, g) => s + g.varietyY, 0)}</b><span>Variety this year</span></div>
+        <div><b>${U.num(st.groups.reduce((s, g) => s + g.ticketsY, 0))}</b><span>Tickets this year</span></div>
+      </div>
+      <p class="tiny muted" style="margin:12px 0 0">Fees and production budgets are paid in full the moment you book, so a
+        schedule never shows up in the weekly books. What it costs afterwards is stamina: ${B.injuryFloor} is the line below
+        which an appearance starts breaking people, and a group booked solid cannot train. A live show is the only booking
+        that pays you back, and the only one that can come in under what it cost.</p>
+      ${doomed}
+    </div>`;
+
+    const weeks = [];
+    for (let i = 1; i <= B.weeksAhead; i++) {
+      const abs = now + i;
+      const season = KP.seasonOfAbs(abs);
+      const booked = KP.bookingsFor(st, null, abs);
+      const rows = st.groups.map(g => {
+        const mine = KP.bookingsFor(st, g.id, abs);
+        const chips = mine.map(b => {
+          const spec = KP.bookingSpec(b);
+          const tone = b.kind === 'music' ? 'hot' : b.kind === 'variety' ? 'cool' : '';
+          const late = abs - now <= B.lateWeeks;
+          return `<span class="chip ${tone}">${U.esc(spec.name)}</span>
+            <button class="btn btn-sm btn-cut" data-act="book-cancel" data-id="${b.id}"
+              title="${late ? 'Too late for a refund — pulling out now costs reputation'
+              : 'Cancel · ' + U.money(Math.round(b.fee * B.cancelBack)) + ' recovered'}">✕</button>`;
+        }).join('');
+        return `<div class="sw-row" style="--accent:${g.color}">
+          <span class="sw-g" title="${U.esc(g.name)}">${U.esc(g.name)}</span>
+          <div class="row">
+            ${chips || '<span class="tiny muted">Nothing booked</span>'}
+            <button class="btn btn-sm" data-act="open-booking" data-gid="${g.id}" data-abs="${abs}">Book</button>
+          </div>
+        </div>`;
+      }).join('');
+
+      weeks.push(`<div class="card sched-week" style="margin-bottom:10px">
+        <div class="sw-head">
+          <b class="mono">${U.esc(KP.engine.weekLabel(st, abs))}</b>
+          <span class="chip">${U.esc(season.kr)} · ${U.esc(season.name)}</span>
+          <span class="spacer"></span>
+          <span class="tiny muted">${booked.length
+        ? booked.length + ' booked · ' + U.money(booked.reduce((s, b) => s + b.fee, 0)) + ' paid'
+        : 'open'}</span>
+        </div>
+        ${rows}
+      </div>`);
+    }
+
+    return head + summary + `<div style="margin-top:16px">${weeks.join('')}</div>`;
+  }
+
   function chartTab(st) {
+    const s = KP.seasonNow(st);
     const head = `<div class="sec-head"><h2>Weekly chart</h2><span class="kr">주간 차트</span>
-      <p>Digital + physical combined, Y${st.year} W${st.week}</p></div>`;
+      <p>Digital + physical combined, Y${st.year} W${st.week}</p>
+      <span class="spacer"></span>
+      <span class="chip ${s.field > 1 ? 'hot' : 'cool'}">${U.esc(s.name)} · rivals ×${s.field.toFixed(2)}</span></div>`;
+
+    // Every ceremony the run has held, newest first. This is the only permanent
+    // record of a chart year anywhere in the game, so it lives next to the chart.
+    const hist = !st.awards.length ? '' : `<div class="sec-head" style="margin-top:28px">
+      <h2>Year-end honours</h2><span class="kr">시상식</span>
+      <p>${st.awards.length} year${st.awards.length === 1 ? '' : 's'} on record</p></div>
+      ${st.awards.map(a => `<div class="card" style="margin-bottom:10px">
+        <div class="eyebrow">Year ${a.y}${a.calendarYear ? ' · ' + a.calendarYear : ''}</div>
+        <div class="disc" style="margin-top:8px">${a.results.map(r => `<div class="disc-row">
+          <span class="pk ${r.mine ? 'gold' : ''}">${U.esc(r.ic)}</span>
+          <span>${U.esc(r.winner)}${r.by ? ' <span class="muted">— ' + U.esc(r.by) + '</span>' : ''}</span>
+          <span class="mono tiny muted">${U.esc(r.name)}</span>
+          <span class="mono tiny ${r.mine ? 'gold' : 'muted'}">${r.mine ? 'YOURS' : ''}</span>
+        </div>`).join('')}</div></div>`).join('')}`;
+
     if (!st.chart || !st.chart.length) {
-      return head + `<div class="empty"><b>Chart not published yet</b>Advance a week to see where the market stands.</div>`;
+      return head + `<div class="empty"><b>Chart not published yet</b>Advance a week to see where the market stands.</div>` + hist;
     }
     const rows = st.chart.slice(0, 20).map(r => `<div class="rung ${r.mine ? 'mine' : ''} ${r.rank === 1 ? 'top1' : ''}">
       <div class="rk">${r.rank}</div>
       <div><div class="ttl">${U.esc(r.title)}</div><div class="art">${U.esc(r.artist)}</div></div>
       <div class="pts">${r.points.toFixed(1)}</div>
     </div>`).join('');
-    return head + `<div class="card"><div class="ladder">${rows}</div></div>`;
+    return head + `<div class="card"><div class="ladder">${rows}</div></div>` + hist;
   }
 
   function logTab(st) {
@@ -388,6 +622,10 @@
     $('#ui-date').textContent = 'Y' + st.year + ' · W' + st.week;
     $('#ui-money').textContent = U.money(st.company.money);
     $('#ui-money').classList.toggle('neg', st.company.money < 0);
+    const owed = KP.debtOutstanding(st);
+    const debtEl = $('#ui-debt');
+    debtEl.textContent = owed > 0 ? U.money(owed) : '—';
+    debtEl.className = 'hud-val ' + (owed > 0 ? 'neg' : 'muted');
     const net = KP.ledger(st).net;
     const burnEl = $('#ui-burn');
     burnEl.textContent = (net >= 0 ? '+' : '') + U.money(net);
@@ -398,11 +636,16 @@
     $('#badge-trainees').textContent = st.trainees.filter(t => !t.groupId).length || '';
     $('#badge-scout').textContent = st.scoutPool.length || '';
     $('#badge-groups').textContent = st.groups.length || '';
+    $('#badge-sched').textContent = st.bookings.length || '';
 
     document.querySelectorAll('.rail-btn').forEach(b =>
       b.classList.toggle('is-on', b.dataset.tab === ui.tab));
 
-    const views = { dash: officeTab, trainees: traineesTab, scout: scoutTab, groups: groupsTab, chart: chartTab, log: logTab };
+    // Same order as the rail in index.html and the tabs array in main.js.
+    const views = {
+      dash: officeTab, trainees: traineesTab, scout: scoutTab, groups: groupsTab,
+      sched: schedTab, chart: chartTab, log: logTab
+    };
     $('#stage').innerHTML = (views[ui.tab] || officeTab)(st);
     $('#stage').scrollTop = 0;
   };
@@ -533,14 +776,16 @@
     ui.drawComeback();
   };
 
-  function tierList(kind, label, sel, rep) {
+  /* `standing` rather than raw reputation, and the same number E.releaseComeback
+     validates against, so a row that looks open cannot be refused. */
+  function tierList(kind, label, sel, standing) {
     return `<div class="wiz-step">
       <span class="eyebrow">${label}</span>
       <div class="opt-list">${KP.tiers[kind].map(t => {
-      const locked = t.rep && rep < t.rep;
+      const locked = t.rep && standing < t.rep;
       return `<button class="opt ${sel === t.k ? 'is-on' : ''} ${locked ? 'locked' : ''}"
           ${locked ? 'disabled' : ''} data-act="plan-tier" data-kind="${kind}" data-key="${t.k}">
-          <div><b>${t.name}</b><small>${t.desc}${locked ? ' · needs reputation ' + t.rep : ''}</small></div>
+          <div><b>${t.name}</b><small>${t.desc}${locked ? ' · needs standing ' + t.rep : ''}</small></div>
           <span class="q">${kind === 'promo' ? '+' + t.q + ' hype · ' + t.weeks + 'w' : 'Q' + t.q}</span>
           <span class="c">${U.money(t.cost)}${kind === 'promo' ? '/w' : ''}</span>
         </button>`;
@@ -585,11 +830,11 @@
         <div class="opt-list">${conceptOpts}</div>
       </div>
 
-      ${tierList('producer', 'Producer', p.sel.producer, st.company.rep)}
-      ${tierList('choreo', 'Choreography', p.sel.choreo, st.company.rep)}
-      ${tierList('mv', 'Music video', p.sel.mv, st.company.rep)}
-      ${tierList('styling', 'Styling', p.sel.styling, st.company.rep)}
-      ${tierList('promo', 'Promotion plan', p.sel.promo, st.company.rep)}
+      ${tierList('producer', 'Producer', p.sel.producer, KP.standing(st))}
+      ${tierList('choreo', 'Choreography', p.sel.choreo, KP.standing(st))}
+      ${tierList('mv', 'Music video', p.sel.mv, KP.standing(st))}
+      ${tierList('styling', 'Styling', p.sel.styling, KP.standing(st))}
+      ${tierList('promo', 'Promotion plan', p.sel.promo, KP.standing(st))}
 
       <div class="est">
         <div><b>${Math.round(pv.quality)}</b><span>Song quality</span></div>
@@ -599,6 +844,11 @@
         <div><b>${U.money(pv.cost)}</b><span>Production</span></div>
         <div><b>${U.money(totalPromo)}</b><span>Promo over ${promo.weeks}w</span></div>
       </div>
+      <p class="tiny muted" style="margin:8px 2px 0">Releasing into <b>${U.esc(pv.season.name)}</b> · ${U.esc(pv.season.kr)} —
+        rival opening points ×${pv.season.field.toFixed(2)}, streaming revenue ×${pv.season.audience.toFixed(2)}.
+        ${pv.season.field > 1
+        ? 'A crowded chart: the same song ranks lower here.'
+        : 'A thin chart: the same song ranks higher here.'}</p>
       ${pv.fatigue < 1 ? `<p class="tiny neg" style="margin:8px 2px 0">Only ${pv.gap} weeks since the last release — waiting until week 16 removes the fatigue penalty.</p>` : ''}
 
       <div class="modal-foot">
@@ -610,6 +860,300 @@
         <button class="btn btn-primary" data-act="plan-release" ${afford ? '' : 'disabled'}>Release it</button>
       </div>
     `);
+  };
+
+  /* ---------------------------- booking modal ------------------------------ */
+  /* Two steps: what kind of appearance, then which show. No text inputs, so no
+     sync-before-redraw is needed here. */
+
+  ui.openBooking = function (gid, abs) {
+    const st = KP.state;
+    const g = st.groups.find(x => x.id === gid);
+    if (!g) return;
+    // A music show is meaningless without a title track out, so don't open on it.
+    ui.book = { gid, abs, kind: g.active ? 'music' : 'variety', show: null };
+    ui.drawBooking();
+  };
+
+  ui.drawBooking = function () {
+    const st = KP.state;
+    const bk = ui.book;
+    const g = st.groups.find(x => x.id === bk.gid);
+    if (!g) return ui.closeModal();
+
+    const kinds = KP.bookingKinds.map(k => {
+      const taken = KP.bookingsFor(st, g.id, bk.abs).some(x => x.kind === k.k);
+      return `<button class="opt ${bk.kind === k.k ? 'is-on' : ''}" data-act="book-kind" data-key="${k.k}">
+        <div><b>${k.ic} ${U.esc(k.name)}
+          <span style="font-family:var(--kr);font-weight:400;color:var(--lilac)">${U.esc(k.kr)}</span></b>
+          <small>${U.esc(k.desc)}</small></div>
+        <span class="q">${taken ? 'already booked' : ''}</span>
+        <span class="c">${KP.showsOf(k.k).length} shows</span>
+      </button>`;
+    }).join('');
+
+    const isLive = bk.kind === 'live';
+    const shows = KP.showsOf(bk.kind).map(s => {
+      const block = KP.engine.bookBlock(st, g, bk.kind, s.k, bk.abs);
+      const pv = KP.engine.bookPreview(st, g, bk.kind, s.k, bk.abs);
+      const note = block ? ' · ' + block
+        : isLive ? ' · ' + U.num(pv.breakEven) + ' seats to break even'
+          : ' · ' + pv.slots + ' slot' + (pv.slots === 1 ? '' : 's') + ' left';
+      return `<button class="opt ${bk.show === s.k ? 'is-on' : ''} ${block ? 'locked' : ''}"
+          ${block ? 'disabled' : ''} data-act="book-show" data-key="${s.k}">
+        <div><b>${U.esc(s.name)}
+          <span style="font-family:var(--kr);font-weight:400;color:var(--lilac)">${U.esc(s.kr)}</span></b>
+          <small>${U.esc(s.desc)}${isLive ? ' · ' + U.num(s.cap) + ' seats' : ''}${U.esc(note)}</small></div>
+        <span class="q">${isLive
+          ? U.num(pv.lo) + '–' + U.num(pv.hi) + ' seats'
+          : bk.kind === 'music'
+            ? '+' + s.points.toFixed(1) + ' pts'
+            : 'variety ' + s.need + '+'}</span>
+        <span class="c">${U.money(isLive ? s.cost : s.fee)}</span>
+      </button>`;
+    }).join('');
+
+    const s = bk.show ? KP.showSpec(bk.kind, bk.show) : null;
+    const pv = s ? KP.engine.bookPreview(st, g, bk.kind, bk.show, bk.abs) : null;
+    const block = s ? KP.engine.bookBlock(st, g, bk.kind, bk.show, bk.abs) : 'Pick a show.';
+    const upfront = s ? (isLive ? s.cost : s.fee) : 0;
+    const afford = s ? st.company.money >= upfront : false;
+
+    let est = '';
+    if (pv && bk.kind === 'music') {
+      est = `<div class="est">
+        <div><b class="neg">${U.money(s.fee)}</b><span>Fee, paid now</span></div>
+        <div><b class="pos">+${pv.points.toFixed(1)}</b><span>Chart points</span></div>
+        <div><b>+${U.num(pv.fansBase)}</b><span>New fans</span></div>
+        <div><b>+${s.repGain.toFixed(2)}</b><span>Reputation</span></div>
+        <div><b>${s.stamina}</b><span>Stamina each</span></div>
+        <div><b>${pv.slots}</b><span>Slots left</span></div>
+      </div>
+      <p class="tiny muted" style="margin:8px 2px 0">The stage is performed before the week's chart is counted, so the points
+        land on this ranking rather than the next one. ${U.esc(pv.season.name)} gives ${U.esc(s.name)}
+        ${pv.season.slotBonus === 0 ? 'its usual capacity' : pv.season.slotBonus > 0
+          ? 'an extra slot' : 'one slot fewer'}.</p>`;
+    } else if (pv && isLive) {
+      est = `<div class="est">
+        <div><b class="neg">${U.money(pv.cost)}</b><span>Paid up front</span></div>
+        <div><b>${U.num(pv.breakEven)}</b><span>Seats to break even</span></div>
+        <div><b>${U.num(pv.lo)}–${U.num(pv.hi)}</b><span>Likely attendance</span></div>
+        <div><b>${Math.round(pv.fillLo * 100)}–${Math.round(pv.fillHi * 100)}%</b><span>Fill</span></div>
+        <div><b class="${pv.doomed ? 'neg' : pv.safe ? 'pos' : ''}">${U.money(pv.grossLo)}–${U.money(pv.grossHi)}</b><span>Gate</span></div>
+        <div><b>${s.stamina}</b><span>Stamina each</span></div>
+      </div>
+      <p class="tiny ${pv.doomed ? 'neg' : pv.safe ? 'pos' : 'muted'}" style="margin:8px 2px 0">
+        ${pv.doomed
+          ? 'This venue cannot break even on your fandom. Do not book it.'
+          : pv.safe
+            ? 'Even a soft week clears the production cost.'
+            : 'A soft week loses money here. Momentum, an active comeback and the season all move the gate.'}
+        Modifiers: comeback ×${pv.mods.promo.toFixed(2)} · momentum ×${pv.mods.heat.toFixed(2)} ·
+        standing ×${pv.mods.stand.toFixed(2)} · ${U.esc(pv.season.name)} ×${pv.mods.audience.toFixed(2)}${pv.mods.stale < 1
+        ? ' · no recent release ×' + pv.mods.stale.toFixed(2) : ''}</p>`;
+    } else if (pv) {
+      est = `<div class="est">
+        <div><b class="neg">${U.money(s.fee)}</b><span>Fee, paid now</span></div>
+        <div><b class="${pv.score >= s.need ? 'pos' : 'neg'}">${Math.round(pv.score)}</b><span>Your best talker</span></div>
+        <div><b class="pos">${Math.round(pv.pViral * 100)}%</b><span>Goes viral</span></div>
+        <div><b class="${pv.pFlat > .25 ? 'neg' : ''}">${Math.round(pv.pFlat * 100)}%</b><span>Falls flat</span></div>
+        <div><b>+${U.num(pv.fansLo)}–${U.num(pv.fansHi)}</b><span>New fans</span></div>
+        <div><b>${s.stamina}</b><span>Stamina each</span></div>
+      </div>
+      <p class="tiny muted" style="margin:8px 2px 0">${pv.talker
+          ? U.esc(pv.talker.name) + ' would carry it at variety ' + Math.round(pv.score) + ', against a show pitched at ' + s.need + '.'
+          : 'Nobody is fit to appear.'}
+        Everyone who appears picks up variety, up to their own ceiling — a cheap slot is the only way a stiff line-up ever learns to be funny.</p>`;
+    }
+
+    const warn = pv && pv.exposed
+      ? `<p class="tiny neg" style="margin:8px 2px 0">${pv.exposed} member${pv.exposed === 1 ? '' : 's'} would come out of this
+        below ${KP.bookings.injuryFloor} stamina — that is where injuries start. Rest them or book something cheaper.</p>`
+      : '';
+
+    ui.modal(`
+      <div class="modal-head">
+        <div><div class="kr">스케줄</div><h3>${U.esc(g.name)} — ${U.esc(KP.engine.weekLabel(st, bk.abs))}</h3></div>
+        <button class="modal-close" data-act="modal-close">✕</button>
+      </div>
+
+      <div class="wiz-step">
+        <span class="eyebrow">1 — What kind of appearance</span>
+        <div class="opt-list">${kinds}</div>
+      </div>
+
+      <div class="wiz-step">
+        <span class="eyebrow">2 — ${isLive ? 'The venue · production is paid the moment you confirm'
+        : 'The booking · the fee is paid the moment you confirm'}</span>
+        <div class="opt-list">${shows}</div>
+      </div>
+
+      ${est}${warn}
+
+      <div class="modal-foot">
+        <span class="tiny ${!s ? 'muted' : block ? 'neg' : afford ? 'muted' : 'neg'}">
+          ${!s ? (isLive ? 'Pick a venue.' : 'Pick a show.') : block ? U.esc(block) : afford
+        ? 'Cancelling more than ' + KP.bookings.lateWeeks + ' weeks out returns half of what you paid. Inside that, nothing.'
+        : isLive ? 'Not enough cash for the production budget.' : 'Not enough cash for the appearance fee.'}
+        </span>
+        <span class="spacer"></span>
+        <button class="btn" data-act="modal-close">Cancel</button>
+        <button class="btn btn-primary" data-act="book-confirm" ${s && !block && afford ? '' : 'disabled'}>Book it</button>
+      </div>
+    `);
+  };
+
+  /* ----------------------------- raising money ----------------------------- */
+  /* Two steps: which kind of money, then whose. No text inputs, so no
+     sync-before-redraw is needed here either. */
+
+  ui.openFinance = function () {
+    ui.fin = { mode: 'loan', pick: null };
+    ui.drawFinance();
+  };
+
+  ui.drawFinance = function () {
+    const st = KP.state;
+    const F = KP.finance;
+    const f = ui.fin;
+    const L = KP.ledger(st);
+    const loan = f.mode === 'loan';
+    const list = KP.engine.financeSpecs(f.mode);
+
+    const modes = [
+      ['loan', 'Borrow', '대출', 'A fixed weekly instalment, billed in the books until the term ends'],
+      ['investor', 'Sell a share', '투자', 'No instalment at all — a cut of everything you earn, for years']
+    ].map(([k, name, kr, desc]) => `<button class="opt ${f.mode === k ? 'is-on' : ''}"
+        data-act="fin-mode" data-key="${k}">
+        <div><b>${name} <span style="font-family:var(--kr);font-weight:400;color:var(--lilac)">${kr}</span></b>
+          <small>${desc}</small></div>
+        <span class="q"></span>
+        <span class="c">${(k === 'loan' ? F.loans : F.investors).length} offers</span>
+      </button>`).join('');
+
+    const offers = list.map(o => {
+      const block = KP.engine.debtBlock(st, f.mode, o.k);
+      const weekly = loan ? KP.engine.debtWeekly(o) : 0;
+      return `<button class="opt ${f.pick === o.k ? 'is-on' : ''} ${block ? 'locked' : ''}"
+          ${block ? 'disabled' : ''} data-act="fin-pick" data-key="${o.k}">
+        <div><b>${U.esc(o.name)}
+          <span style="font-family:var(--kr);font-weight:400;color:var(--lilac)">${U.esc(o.kr)}</span></b>
+          <small>${U.esc(o.desc)}${block ? ' · ' + U.esc(block) : ''}</small></div>
+        <span class="q">${loan ? U.money(weekly) + '/w · ' + o.weeks + 'w'
+        : Math.round(o.share * 100) + '% · ' + o.weeks + 'w'}</span>
+        <span class="c">${U.money(o.principal)}</span>
+      </button>`;
+    }).join('');
+
+    const spec = f.pick ? list.find(x => x.k === f.pick) : null;
+    const block = spec ? KP.engine.debtBlock(st, f.mode, spec.k) : 'Pick an offer.';
+
+    let est = '';
+    if (spec) {
+      const weekly = loan ? KP.engine.debtWeekly(spec) : 0;
+      const received = Math.round(spec.principal * (1 - F.origination));
+      // What the money changes about the week: an instalment for a loan, and for
+      // an investor the cut they would take off the one income line that recurs.
+      const cut = loan ? 0 : Math.round(L.in.merch * spec.share);
+      const netAfter = L.net - weekly - cut;
+      const cashAfter = st.company.money + received;
+      const runway = netAfter < 0
+        ? Math.floor((cashAfter - KP.costs.bankruptcyFloor) / -netAfter) : 99;
+      const limit = KP.creditLimit(st);
+      const used = KP.debtOutstanding(st) + (loan ? spec.principal : 0);
+
+      est = `<div class="est">
+        <div><b class="pos">${U.money(received)}</b><span>Received now</span></div>
+        <div><b class="neg">${loan ? U.money(weekly) + '/w' : Math.round(spec.share * 100) + '%'}</b>
+          <span>${loan ? 'Weekly' : 'Share of income'}</span></div>
+        <div><b>${U.money(loan ? weekly * spec.weeks : spec.principal * F.buyoutMul)}</b>
+          <span>${loan ? 'Total repaid' : 'Buyout ceiling'}</span></div>
+        <div><b class="${runway < 12 ? 'neg' : ''}">${runway > 90 ? '∞' : runway + 'w'}</b><span>Runway after</span></div>
+        <div><b>${limit > 0 ? Math.round(used / limit * 100) : 0}%</b><span>Credit used</span></div>
+        <div><b>${spec.weeks}w</b><span>Term</span></div>
+      </div>
+      <p class="tiny ${loan ? 'muted' : 'neg'}" style="margin:8px 2px 0">${loan
+        ? U.money(spec.principal * F.origination) + ' of the principal goes on origination, and the instalment is billed in the '
+        + 'weekly books from next week — so the runway above is the honest one. Clearing it early forgives half the interest you '
+        + 'have not been charged yet.'
+        : 'No instalment, nothing to miss, and no way to default on it. What it costs instead is uncapped: '
+        + Math.round(spec.share * 100) + '% of every album, stream, gate and merch won for ' + spec.weeks
+        + ' weeks. Succeed and they take far more than they lent — the buyout above is the only way to stop it.'}</p>`;
+    }
+
+    ui.modal(`
+      <div class="modal-head">
+        <div><div class="kr">자금 조달</div><h3>Raise money</h3></div>
+        <button class="modal-close" data-act="modal-close">✕</button>
+      </div>
+
+      <div class="wiz-step">
+        <span class="eyebrow">1 — What kind of money</span>
+        <div class="opt-list">${modes}</div>
+      </div>
+
+      <div class="wiz-step">
+        <span class="eyebrow">2 — ${loan ? 'Who lends it · credit free ' + U.money(KP.creditFree(st))
+        : 'Who buys in · they take their cut from the week you sign'}</span>
+        <div class="opt-list">${offers}</div>
+      </div>
+
+      ${est}
+
+      <div class="modal-foot">
+        <span class="tiny ${block ? 'neg' : 'muted'}">${block ? U.esc(block)
+        : 'Nothing about this is reversible except by paying it off.'}</span>
+        <span class="spacer"></span>
+        <button class="btn" data-act="modal-close">Cancel</button>
+        <button class="btn" data-act="fin-take" data-key="${spec ? spec.k : ''}"
+          ${spec && !block ? '' : 'disabled'}>Sign it</button>
+      </div>
+    `);
+  };
+
+  /* ------------------------------- the ceremony ---------------------------- */
+  /* Not locked: the player is allowed to close it. main.js therefore opens it
+     after ui.render() and only when the run is still alive — a dead run outranks
+     a ceremony, and there is exactly one modal root to argue over. */
+
+  ui.openAwards = function (y) {
+    const st = KP.state;
+    const rec = st.awards.find(a => a.y === y);
+    if (!rec) return;
+    const mine = rec.results.filter(r => r.mine);
+
+    // Gold on a trophy is the one thing --gold was reserved for.
+    const rows = rec.results.map(r => `<div class="opt ${r.mine ? 'is-on' : ''}">
+      <div><b>${r.mine ? '<span class="gold">' + U.esc(r.ic) + '</span> ' : U.esc(r.ic) + ' '}${U.esc(r.winner)}${r.by
+      ? ' <span class="muted">— ' + U.esc(r.by) + '</span>' : ''}</b>
+        <small>${U.esc(r.name)} · ${U.esc(r.kr)} · ${U.esc(r.detail)}</small></div>
+      <span class="q">${r.mine ? 'YOURS' : ''}</span>
+      <span class="c mono">${r.score}</span>
+    </div>`).join('');
+
+    ui.modal(`
+      <div class="modal-head">
+        <div><div class="kr">시상식</div><h3>Year ${rec.y} — Year-End Awards</h3></div>
+        <button class="modal-close" data-act="modal-close">✕</button>
+      </div>
+      <p class="${mine.length ? 'muted' : 'neg'}" style="margin:0 0 14px">
+        ${mine.length
+        ? 'You go home with ' + mine.length + ' trophy' + (mine.length === 1 ? '' : 's') + '. Reputation, fandom and standing all move tonight.'
+        : 'The cameras were somewhere else all night. Nothing here is out of reach next year.'}
+      </p>
+      <div class="opt-list">${rows}</div>
+      <div class="est">
+        <div><b class="gold">${mine.length}</b><span>Trophies</span></div>
+        <div><b>${Math.round(st.company.rep)}</b><span>Reputation</span></div>
+        <div><b>${st.company.prestige}</b><span>Prestige</span></div>
+        <div><b>${Math.round(KP.standing(st))}</b><span>Standing</span></div>
+      </div>
+      <div class="modal-foot">
+        <span class="tiny muted">Standing is what producers, broadcasters, venues and lenders read.
+          Prestige is permanent, and caps at ${KP.awards.prestigeCap}.</span>
+        <span class="spacer"></span>
+        <button class="btn btn-primary" data-act="modal-close">Take the stage</button>
+      </div>`);
   };
 
   /* ----------------------------- misc modals ------------------------------- */
@@ -634,15 +1178,28 @@
 
   ui.gameOver = function () {
     const st = KP.state;
+    // Two ways to lose, and the player is owed the difference: insolvency is
+    // running out of money, default is somebody else deciding you had.
+    const bust = st.over === 'default';
+    const debts = st.company.debts || [];
+    const called = debts.slice().sort((a, b) => b.missed - a.missed)[0];
+    const missed = debts.reduce((n, d) => n + d.missed, 0);
+
     ui.modal(`
-      <div class="modal-head"><div><div class="kr">폐업</div><h3>The agency folded</h3></div></div>
-      <p class="muted">You ran ${U.esc(st.company.name)} for ${(st.year - 1) * 52 + st.week} weeks,
+      <div class="modal-head"><div><div class="kr">${bust ? '부도' : '폐업'}</div>
+        <h3>${bust ? 'The creditors took it' : 'The agency folded'}</h3></div></div>
+      <p class="muted">You ran ${U.esc(st.company.name)} for ${KP.absWeek(st)} weeks,
         debuted ${st.groups.length} group${st.groups.length === 1 ? '' : 's'},
         released ${st.stats.releases} title tracks and won ${st.stats.wins} music shows.</p>
+      ${bust ? `<p class="neg">${called ? U.esc(called.name) : 'A lender'} was called in after
+        ${missed} missed payment${missed === 1 ? '' : 's'}. The building, the contracts and the
+        catalogue went with it.</p>` : ''}
       <div class="est">
         <div><b>${U.num(KP.totalFans(st))}</b><span>Fans at the end</span></div>
         <div><b>${Math.round(st.company.rep)}</b><span>Reputation</span></div>
+        <div><b class="${bust ? 'neg' : ''}">${U.money(KP.debtOutstanding(st))}</b><span>Still owed</span></div>
         <div><b class="gold">${st.stats.no1}</b><span>#1 singles</span></div>
+        <div><b class="gold">${st.groups.reduce((n, g) => n + KP.trophyCount(g), 0)}</b><span>Trophies</span></div>
       </div>
       <div class="modal-foot"><span class="spacer"></span>
         <button class="btn btn-primary" data-act="menu-quit">Start over</button></div>`, { locked: true });

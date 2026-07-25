@@ -110,7 +110,9 @@
         money: d.money,
         rep: d.rep,
         facilities: { training: 1, studio: 1, dorm: 1 },
-        staff: { vocal: 1, dance: 1, producer: 1, marketing: 1 }
+        staff: { vocal: 1, dance: 1, producer: 1, marketing: 1 },
+        debts: [],          // open loans and investors, both of them
+        prestige: 0         // permanent standing, ORDER 5's trophies write it
       },
       trainees: [],
       groups: [],
@@ -119,9 +121,15 @@
       log: [],
       recap: [],
       chart: [],          // last simulated week's top list
+      bookings: [],       // paid appearances waiting for their week
+      // The year's record, accrued weekly because nothing else remembers it.
+      yearbook: { y: 1, acts: {}, songs: {} },
+      knownRivals: {},    // artist -> the year we first saw them chart
+      awards: [],         // ceremonies, newest year first
+      pendingAwards: null,// a year number the UI still owes the player a look at
       trendWeek: 0,
       trends: {},
-      stats: { releases: 0, wins: 0, no1: 0 }
+      stats: { releases: 0, wins: 0, no1: 0, stages: 0, varietyShows: 0, lives: 0, tickets: 0 }
     };
     KP.concepts.forEach(c => { st.trends[c.k] = U.irnd(35, 70); });
 
@@ -142,13 +150,14 @@
     const n = 6;
     st.scoutPool = [];
     for (let i = 0; i < n; i++) {
-      // Reputation opens the door to better auditions.
-      const q = U.clamp(U.rnd(0, .55) + st.company.rep / 220, 0, 1);
+      // Standing opens the door to better auditions — a trophy on the wall is
+      // exactly the kind of thing a hopeful's parents read about.
+      const q = U.clamp(U.rnd(0, .55) + KP.standing(st) / 220, 0, 1);
       const t = KP.makeTrainee(q);
       t.signCost = KP.signingCost(t);
       st.scoutPool.push(t);
     }
-    st.scoutRefreshedWeek = st.week + (st.year - 1) * 52;
+    st.scoutRefreshedWeek = KP.absWeek(st);
     if (!silent) KP.log('New audition round posted — 6 hopefuls waiting.', 'info');
   };
 
@@ -162,48 +171,92 @@
     return entry;
   };
 
-  /* ------------------------------ derived data ----------------------------- */
-  KP.weeklyBurn = function (st) {
-    const c = KP.costs;
-    let sum = 0;
-    sum += st.trainees.filter(t => !t.groupId).length * c.traineeWeek;
-    // Idol pay scales with the group's fame — success is its own running cost.
-    st.groups.forEach(g => {
-      const mult = 1 + Math.min(g.fans / 400e3, 6);
-      sum += g.memberIds.length * c.idolWeek * mult;
-    });
-    const f = st.company.facilities;
-    sum += (f.training + f.studio + f.dorm) * c.facilityWeek;
-    const s = st.company.staff;
-    sum += (s.vocal + s.dance + s.producer + s.marketing) * c.staffWeek;
-    st.groups.forEach(g => { if (g.active) sum += g.active.promoCost; });
-    return sum;
-  };
+  /* ------------------------------ derived data -----------------------------
+     KP.ledger is the ONE derivation of the weekly books. weeklyBurn delegates
+     to it and officeTab reads it — the three copies this file used to carry
+     drifted the moment anything new was billed. A new weekly line item is one
+     entry in outMap and one tuple in ui.js's ledger(), and nowhere else.
 
-  /* Studio rental and session work keep the lights on before the first debut. */
-  KP.weeklyMisc = function (st) {
-    return KP.income.miscWeek + st.company.rep * KP.income.miscPerRep;
-  };
-
-  /* Line-by-line books, so the player can see where the money actually goes. */
+     PURITY IS LOAD-BEARING: this runs on every ui.render(). It must never
+     mutate a loan, a booking or a balance. Amortisation lives in
+     E.serviceDebt(), step 5b. */
   KP.ledger = function (st) {
     const c = KP.costs, f = st.company.facilities, s = st.company.staff;
+    const debts = st.company.debts || [];
+
     const outMap = {
       trainees: st.trainees.filter(t => !t.groupId).length * c.traineeWeek,
+      // Idol pay scales with the group's fame — success is its own running cost.
       idols: st.groups.reduce((n, g) =>
         n + g.memberIds.length * c.idolWeek * (1 + Math.min(g.fans / 400e3, 6)), 0),
       facilities: (f.training + f.studio + f.dorm) * c.facilityWeek,
       staff: (s.vocal + s.dance + s.producer + s.marketing) * c.staffWeek,
-      promo: st.groups.reduce((n, g) => n + (g.active ? g.active.promoCost : 0), 0)
+      promo: st.groups.reduce((n, g) => n + (g.active ? g.active.promoCost : 0), 0),
+      debt: debts.reduce((n, d) => n + KP.debtInstalment(d), 0)
     };
     const inMap = {
       merch: st.groups.reduce((n, g) => n + g.fans * KP.income.merchPerFan, 0),
       side: KP.weeklyMisc(st)
     };
+    // An investor's cut is taken at the moment income is credited (E.earn), so
+    // it is NOT part of totalOut — step 5 must not bill it a second time. It is
+    // surfaced here because a line the player cannot see is a line that lies.
+    const shareRate = debts.reduce((n, d) => n + (d.type === 'investor' && d.weeksLeft > 0 ? d.share : 0), 0);
+    const share = Math.round(inMap.merch * Math.min(shareRate, 1));
+
     const totalIn = inMap.merch + inMap.side;
     const totalOut = Object.values(outMap).reduce((a, b) => a + b, 0);
-    return { in: inMap, out: outMap, totalIn, totalOut, net: totalIn - totalOut };
+    return { in: inMap, out: outMap, share, shareRate, totalIn, totalOut, net: totalIn - share - totalOut };
   };
+
+  /* What step 5 bills. Everything billable, nothing else. */
+  KP.weeklyBurn = function (st) { return KP.ledger(st).totalOut; };
+
+  /* Studio rental and session work keep the lights on before the first debut. */
+  KP.weeklyMisc = function (st) {
+    return KP.income.miscWeek + KP.standing(st) * KP.income.miscPerRep;
+  };
+
+  /* ------------------------------- the books -------------------------------
+     `remaining` is the debt and `weekly` is the instalment, and the two have to
+     agree: KP.debtOutstanding is what the HUD, the finance card and
+     E.payoffCost all call Debt, while this is what step 5 actually takes out of
+     the balance. Billing a full instalment against a smaller balance owed —
+     which two missed payments used to arrange, because the miss branch stretched
+     the term and the term was the only thing that retired the loan — puts a
+     "Debt ₩0" beside a live "Weekly service" and takes money for a principal
+     that is not there. So the last week bills what is left rather than a round
+     instalment, and a loan whose balance is already clear bills nothing.
+     E.serviceDebt amortises exactly this number. */
+  KP.debtInstalment = function (d) {
+    if (!d || d.type !== 'loan' || !(d.weeksLeft > 0)) return 0;
+    return Math.max(0, Math.min(d.weekly, d.remaining));
+  };
+
+  KP.debtOutstanding = function (st) {
+    return (st.company.debts || []).reduce((n, d) =>
+      n + (d.type === 'loan' ? Math.max(0, d.remaining) : 0), 0);
+  };
+
+  /* What a lender thinks you are worth: half the LIST price of every level above
+     base, plus your fandom, plus your standing — with a floor, so a brand new
+     agency can still get a small line and the early game has a way out.
+     Deliberately not half of what those levels cost, which is a different and
+     much larger number: E.upgrade charges lvl × the constant, so a full Lv5 room
+     costs 1+2+3+4 of them while this counts 4. A lender values the room, not the
+     receipts. Making it triangular would raise the credit line in every existing
+     save, so it is a balance change rather than a correction. */
+  KP.collateral = function (st) {
+    const f = st.company.facilities, s = st.company.staff, F = KP.finance;
+    const built = (f.training + f.studio + f.dorm - 3) * KP.costs.facilityUpgrade
+      + (s.vocal + s.dance + s.producer + s.marketing - 4) * KP.costs.staffUpgrade;
+    return Math.round(built * F.collateralRate
+      + KP.totalFans(st) * F.fanCollateral
+      + KP.standing(st) * F.standingCollateral);
+  };
+
+  KP.creditLimit = (st) => KP.finance.baseCredit + KP.collateral(st);
+  KP.creditFree = (st) => Math.max(0, KP.creditLimit(st) - KP.debtOutstanding(st));
 
   KP.totalFans = function (st) {
     return st.groups.reduce((s, g) => s + g.fans, 0);
@@ -215,6 +268,110 @@
 
   KP.concept = (k) => KP.concepts.find(c => c.k === k) || KP.concepts[0];
   KP.trait = (k) => KP.traits.find(t => t.k === k);
+
+  /* ------------------------------ the calendar -----------------------------
+     Absolute weeks are the game's real clock. A (year, week) pair does not
+     compare or subtract — Y2 W1 is one week after Y1 W52 and no arithmetic on
+     the pair says so — so anything measuring a distance in time (release gaps,
+     audition refresh, and every schedule the later sprints add) works in
+     absolute weeks and gets them from here. */
+  KP.absWeek = (st) => st.week + (st.year - 1) * KP.WEEKS_PER_YEAR;
+
+  KP.seasonOfWeek = function (week) {
+    const w = U.clamp(Math.round(week), 1, KP.WEEKS_PER_YEAR);
+    return KP.seasons.find(s => w >= s.w1 && w <= s.w2) || KP.seasons[0];
+  };
+
+  /* Pure and stable for a given absolute week — a schedule the player books
+     weeks ahead has to read the same season every time it is redrawn. Weeks
+     before the start of the run wrap backwards rather than clamping, so a
+     market song aged in from "last year" lands in a plausible season. */
+  KP.seasonOfAbs = function (abs) {
+    const n = KP.WEEKS_PER_YEAR;
+    return KP.seasonOfWeek(((Math.round(abs) - 1) % n + n) % n + 1);
+  };
+
+  KP.seasonNow = (st) => KP.seasonOfWeek(st.week);
+
+  /* ------------------------------ the schedule -----------------------------
+     Derived reads over KP.bookings. Everything here is pure: the booking board
+     is redrawn on every render and a capacity number that moved between two
+     redraws would be a slot the player watched disappear. */
+  KP.show = function (kind, key) {
+    const list = KP.bookings.shows[kind];
+    return (list && list.find(s => s.k === key)) || null;
+  };
+
+  KP.venue = (key) => KP.venues.find(v => v.k === key) || null;
+
+  /* A spec by kind and key, a booking record's spec, and every spec of a kind —
+     the three seams the booking modal and the engine read so that neither has to
+     know where a particular kind keeps its list. `live` keeps its specs in
+     KP.venues because a venue is priced by seats, not by an appearance fee. */
+  KP.showSpec = (kind, key) => kind === 'live' ? KP.venue(key) : KP.show(kind, key);
+
+  KP.bookingSpec = function (b) { return KP.showSpec(b.kind, b.show); };
+
+  KP.showsOf = (kind) => kind === 'live' ? KP.venues : (KP.bookings.shows[kind] || []);
+
+  KP.bookingsFor = function (st, groupId, absWeek) {
+    return (st.bookings || []).filter(b =>
+      (groupId == null || b.groupId === groupId) &&
+      (absWeek == null || b.absWeek === absWeek));
+  };
+
+  /* How many places are left on a given show in a given week.
+
+     A show's own `slots` is shifted by the season — the crowded comeback
+     seasons take one away, which is what makes a one-slot show disappear
+     entirely for eleven weeks at a time — and then the rivals who are also on
+     the bill take their share. That share is deterministic in the show and the
+     week (never random, never stateful) for two reasons: a board the player is
+     reading must not reshuffle under them, and floor() of a fraction below 1
+     can never take the last slot, so a show the season permits is always
+     bookable by somebody. */
+  KP.slotsOpen = function (st, kind, key, absWeek) {
+    const show = KP.show(kind, key);
+    if (!show) return 0;
+    const season = KP.seasonOfAbs(absWeek);
+    if (show.seasons && show.seasons.indexOf(season.k) < 0) return 0;
+    const base = (show.slots || 0) + season.slotBonus;
+    if (base <= 0) return 0;
+    const rivals = Math.floor(U.hue(kind + ':' + key + ':' + Math.round(absWeek)) / 360 * base);
+    const mine = KP.bookingsFor(st, null, Math.round(absWeek))
+      .filter(b => b.kind === kind && b.show === key).length;
+    return Math.max(0, base - rivals - mine);
+  };
+
+  /* Reputation is what events move. Standing is what gates read: reputation
+     plus the permanent prestige that trophies leave behind, capped so that a
+     shelf of daesangs can carry an agency a long way up the board but never all
+     the way to the top of it on its own. */
+  KP.standing = (st) => U.clamp(
+    st.company.rep + Math.min(st.company.prestige || 0, KP.awards.prestigeCap), 0, 100);
+
+  /* -------------------------- the yearbook & awards ------------------------ */
+  KP.prize = (k) => KP.awards.prizes.find(p => p.k === k) || null;
+
+  /* Trophies a group has ever won, newest first, for the group card. */
+  KP.trophyCount = (g) => (g.trophies || []).length;
+
+  /* The player's own side of the running yearbook, totalled. This is the ballot
+     the ceremony will be read from, so the office can show it months before the
+     night — an award you cannot see coming is an award you cannot chase. */
+  KP.yearTotals = function (st) {
+    const acts = (st.yearbook && st.yearbook.acts) || {};
+    const out = {
+      cp: 0, no1: 0, top3: 0, top10: 0, weeks: 0,
+      sales: 0, fans: 0, revenue: 0, stages: 0, variety: 0, tickets: 0
+    };
+    Object.keys(acts).forEach(k => {
+      const a = acts[k];
+      if (!a || !a.mine) return;
+      Object.keys(out).forEach(f => { out[f] += a[f] || 0; });
+    });
+    return out;
+  };
 
   /* ============================== persistence ==============================
      Two separate mechanisms, and picking the right one matters:
@@ -234,9 +391,15 @@
 
   /* migrations[n] upgrades a v=n state to v=n+1. Every version from 1 to
      SAVE_V-1 needs a rung; a gap is a hard failure, not a silent pass, because
-     skipping one would hand the engine a state it cannot read. */
+     skipping one would hand the engine a state it cannot read.
+
+     The example is deliberately a field changing UNITS, because that is the only
+     shape that belongs here. Adding a field — `st.company.debts = []` and every
+     other new key this game has grown — is additive and belongs in normalise();
+     writing it as a migration would bump SAVE_V for no reason and lock out every
+     file written by the previous build. */
   KP.migrations = {
-    // 1: function (st) { st.company.loans = []; return st; },
+    // 1: function (st) { st.groups.forEach(g => { g.fans = Math.round(g.fans / 100); }); return st; },
   };
 
   /* Fills in anything an older or hand-edited save may be missing. Additive
@@ -248,20 +411,88 @@
     st.company.staff = Object.assign({ vocal: 1, dance: 1, producer: 1, marketing: 1 }, st.company.staff);
     if (typeof st.company.rep !== 'number') st.company.rep = 0;
     if (!st.company.gender) st.company.gender = 'f';
+    // ui.render() reads .name and .ceo on every redraw and .replace()s the name.
+    if (typeof st.company.name !== 'string' || !st.company.name) st.company.name = 'STARLINE';
+    if (typeof st.company.ceo !== 'string') st.company.ceo = '';
+    // officeTab reads KP.difficulties[difficulty].label on every render, so a file
+    // carrying a difficulty this build does not have would brick the default tab
+    // rather than fail politely. Fall back to the middle setting.
+    if (!KP.difficulties[st.company.difficulty]) st.company.difficulty = 'normal';
+    // A save with no debt in it is a valid save, so both of these are additive.
+    if (!Array.isArray(st.company.debts)) st.company.debts = [];
+    // The records themselves, not just the container. A loan missing `weekly`
+    // makes KP.ledger's debt line NaN, which makes weeklyBurn NaN, which makes
+    // the balance NaN — and `NaN < bankruptcyFloor` is false, so the run becomes
+    // unloseable and the next autosave writes `money: null`, which this build
+    // then refuses to read at all. One missing `remaining` does the same to
+    // KP.creditFree and hands out unlimited credit. These are the numbers
+    // everything else in the books divides by, so they are sanitised here rather
+    // than forgiven at each of the six sites that read them.
+    st.company.debts = st.company.debts.filter(d =>
+      d && (d.type === 'loan' || d.type === 'investor'));
+    st.company.debts.forEach(d => {
+      ['principal', 'weeks', 'weeksLeft', 'weekly', 'remaining', 'share', 'paid', 'missed']
+        .forEach(k => { if (typeof d[k] !== 'number' || !isFinite(d[k])) d[k] = 0; });
+      if (typeof d.id !== 'string') d.id = U.uid('fin');
+      if (typeof d.name !== 'string') d.name = d.type === 'loan' ? 'A loan' : 'An investor';
+    });
+    if (typeof st.company.prestige !== 'number') st.company.prestige = 0;
     if (!Array.isArray(st.log)) st.log = [];
     if (!Array.isArray(st.recap)) st.recap = [];
     if (!Array.isArray(st.chart)) st.chart = [];
     if (!Array.isArray(st.scoutPool)) st.scoutPool = [];
+    if (!Array.isArray(st.bookings)) st.bookings = [];
+    // An empty yearbook is a valid state: the first ceremony after loading an
+    // older save judges whatever the accumulator collected from here on.
+    if (!st.yearbook || typeof st.yearbook !== 'object' || Array.isArray(st.yearbook)) {
+      st.yearbook = { y: st.year, acts: {}, songs: {} };
+    }
+    if (typeof st.yearbook.y !== 'number') st.yearbook.y = st.year;
+    if (!st.yearbook.acts || typeof st.yearbook.acts !== 'object') st.yearbook.acts = {};
+    if (!st.yearbook.songs || typeof st.yearbook.songs !== 'object') st.yearbook.songs = {};
+    if (!st.knownRivals || typeof st.knownRivals !== 'object') st.knownRivals = {};
+    if (!Array.isArray(st.awards)) st.awards = [];
+    if (typeof st.pendingAwards !== 'number') st.pendingAwards = null;
     if (typeof st.calendarYear !== 'number') st.calendarYear = 2025 + st.year;
-    if (typeof st.scoutRefreshedWeek !== 'number') st.scoutRefreshedWeek = st.week + (st.year - 1) * 52;
-    st.stats = Object.assign({ releases: 0, wins: 0, no1: 0 }, st.stats);
+    if (typeof st.scoutRefreshedWeek !== 'number') st.scoutRefreshedWeek = KP.absWeek(st);
+    st.stats = Object.assign(
+      { releases: 0, wins: 0, no1: 0, stages: 0, varietyShows: 0, lives: 0, tickets: 0 }, st.stats);
     st.trends = st.trends || {};
     KP.concepts.forEach(c => { if (typeof st.trends[c.k] !== 'number') st.trends[c.k] = 50; });
     st.groups.forEach(g => {
       if (!Array.isArray(g.releases)) g.releases = [];
       if (typeof g.momentum !== 'number') g.momentum = 0;
       if (typeof g.fans !== 'number') g.fans = 0;
+      if (typeof g.stagesY !== 'number') g.stagesY = 0;
+      if (typeof g.varietyY !== 'number') g.varietyY = 0;
+      // The group card prints g.debut.y unconditionally, and the yearbook reads it
+      // to decide who is a rookie. A group without one is a crash, not a blank.
+      if (!g.debut || typeof g.debut.y !== 'number') g.debut = { y: st.year, w: st.week };
+      // { venueKey: absWeek } — the last week that tier was played, which is
+      // what every live cooldown is measured from.
+      if (!g.liveAbs || typeof g.liveAbs !== 'object' || Array.isArray(g.liveAbs)) g.liveAbs = {};
+      if (typeof g.livesY !== 'number') g.livesY = 0;
+      if (typeof g.ticketsY !== 'number') g.ticketsY = 0;
+      if (!Array.isArray(g.trophies)) g.trophies = [];   // [{ y, k, ic, name }]
+      // A release that was mid-promotion when the file was written predates the
+      // per-release counters. Its release week is recoverable rather than
+      // guessed: it went out rel.week weeks ago.
+      if (g.active) {
+        if (typeof g.active.releasedAbs !== 'number') {
+          const abs = KP.absWeek(st) - (g.active.week || 0);
+          g.active.releasedAbs = abs;
+          g.active.releasedY = Math.floor((abs - 1) / KP.WEEKS_PER_YEAR) + 1;
+          g.active.releasedW = ((abs - 1) % KP.WEEKS_PER_YEAR) + 1;
+        }
+        if (typeof g.active.pointWeeks !== 'number') g.active.pointWeeks = 0;
+        if (typeof g.active.weeksTop10 !== 'number') g.active.weeksTop10 = 0;
+        if (typeof g.active.weeksTop3 !== 'number') g.active.weeksTop3 = 0;
+      }
     });
+    // A booking whose group or show no longer exists would resolve into nothing
+    // and render as a blank row. Hand-edited files and disbands both produce it.
+    st.bookings = st.bookings.filter(b =>
+      b && KP.bookingSpec(b) && st.groups.some(g => g.id === b.groupId));
     // st.market is deliberately left alone — ensureMarket() rebuilds it.
     return st;
   }
