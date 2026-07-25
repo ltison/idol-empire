@@ -623,6 +623,8 @@
       </div>
       <div class="opt-list">
         <button class="opt" data-act="menu-save"><div><b>Save now</b><small>The run also autosaves every week</small></div><span></span><span class="c">⌘</span></button>
+        <button class="opt" data-act="menu-export"><div><b>Download save</b><small>A JSON file you can keep, move to another browser or re-import later</small></div><span></span><span class="c">↓</span></button>
+        <button class="opt" data-act="menu-import"><div><b>Load save file</b><small>Replaces the run in progress</small></div><span></span><span class="c">↑</span></button>
         <button class="opt" data-act="menu-quit"><div><b>Abandon run</b><small>Deletes the save and returns to the title</small></div><span></span><span class="c">✕</span></button>
       </div>
       <div class="modal-foot">

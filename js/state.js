@@ -97,7 +97,7 @@
   KP.newGame = function (opts) {
     const d = KP.difficulties[opts.difficulty] || KP.difficulties.normal;
     const st = {
-      v: 1,
+      v: SAVE_V,
       year: 1,
       week: 1,
       calendarYear: 2026,
@@ -216,7 +216,98 @@
   KP.concept = (k) => KP.concepts.find(c => c.k === k) || KP.concepts[0];
   KP.trait = (k) => KP.traits.find(t => t.k === k);
 
-  /* ------------------------------ persistence ------------------------------ */
+  /* ============================== persistence ==============================
+     Two separate mechanisms, and picking the right one matters:
+
+       normalise()    additive changes — a new field with a sane default. No
+                      version bump: old saves are back-filled on the way in.
+       KP.migrations  breaking changes — a field that changed meaning, shape or
+                      units. Bump SAVE_V and add the matching rung.
+
+     A downloaded save outlives the build that wrote it, so both paths have to
+     stay honest: an unreadable save is reported, never silently discarded and
+     never half-loaded into a running game.
+     ========================================================================== */
+
+  const SAVE_V = 1;              // schema version of the state object
+  KP.SAVE_V = SAVE_V;
+
+  /* migrations[n] upgrades a v=n state to v=n+1. Every version from 1 to
+     SAVE_V-1 needs a rung; a gap is a hard failure, not a silent pass, because
+     skipping one would hand the engine a state it cannot read. */
+  KP.migrations = {
+    // 1: function (st) { st.company.loans = []; return st; },
+  };
+
+  /* Fills in anything an older or hand-edited save may be missing. Additive
+     fields belong here rather than in a migration — cheaper and it also
+     hardens import against a file that lost a key somewhere along the way. */
+  function normalise(st) {
+    st.company = st.company || {};
+    st.company.facilities = Object.assign({ training: 1, studio: 1, dorm: 1 }, st.company.facilities);
+    st.company.staff = Object.assign({ vocal: 1, dance: 1, producer: 1, marketing: 1 }, st.company.staff);
+    if (typeof st.company.rep !== 'number') st.company.rep = 0;
+    if (!st.company.gender) st.company.gender = 'f';
+    if (!Array.isArray(st.log)) st.log = [];
+    if (!Array.isArray(st.recap)) st.recap = [];
+    if (!Array.isArray(st.chart)) st.chart = [];
+    if (!Array.isArray(st.scoutPool)) st.scoutPool = [];
+    if (typeof st.calendarYear !== 'number') st.calendarYear = 2025 + st.year;
+    if (typeof st.scoutRefreshedWeek !== 'number') st.scoutRefreshedWeek = st.week + (st.year - 1) * 52;
+    st.stats = Object.assign({ releases: 0, wins: 0, no1: 0 }, st.stats);
+    st.trends = st.trends || {};
+    KP.concepts.forEach(c => { if (typeof st.trends[c.k] !== 'number') st.trends[c.k] = 50; });
+    st.groups.forEach(g => {
+      if (!Array.isArray(g.releases)) g.releases = [];
+      if (typeof g.momentum !== 'number') g.momentum = 0;
+      if (typeof g.fans !== 'number') g.fans = 0;
+    });
+    // st.market is deliberately left alone — ensureMarket() rebuilds it.
+    return st;
+  }
+
+  /* The shape the game cannot run without. Anything softer belongs in
+     normalise(); this is only what makes a file a save at all. */
+  function structureError(st) {
+    if (!st || typeof st !== 'object' || Array.isArray(st)) return 'not a save file';
+    if (typeof st.v !== 'number') return 'no format version';
+    if (typeof st.year !== 'number' || typeof st.week !== 'number') return 'no calendar';
+    if (!st.company || typeof st.company !== 'object') return 'no company';
+    if (typeof st.company.money !== 'number') return 'no balance';
+    if (!Array.isArray(st.trainees) || !Array.isArray(st.groups)) return 'no roster';
+    return null;
+  }
+
+  /* Takes a parsed state of any past version, returns { ok, state, from } or
+     { ok:false, msg }. Works on a copy, so a failure leaves the caller's object
+     — and any run currently in progress — untouched. */
+  KP.migrate = function (input) {
+    let st;
+    try { st = JSON.parse(JSON.stringify(input)); }
+    catch (e) { return { ok: false, msg: 'That save could not be read.' }; }
+
+    const bad = structureError(st);
+    if (bad) return { ok: false, msg: 'That file is not an IDOL EMPIRE save (' + bad + ').' };
+
+    const from = st.v;
+    if (st.v > SAVE_V) {
+      return { ok: false, msg: 'That save is from a newer version of the game (format v' + st.v + ', this build reads v' + SAVE_V + ').' };
+    }
+    while (st.v < SAVE_V) {
+      const step = KP.migrations[st.v];
+      if (typeof step !== 'function') {
+        return { ok: false, msg: 'No upgrade path from format v' + st.v + ' to v' + SAVE_V + '.' };
+      }
+      const at = st.v;
+      try { st = step(st) || st; }
+      catch (e) { return { ok: false, msg: 'Upgrading this save from v' + at + ' failed.' }; }
+      st.v = at + 1;
+    }
+
+    normalise(st);
+    return { ok: true, state: st, from, migrated: from !== st.v };
+  };
+
   KP.save = function () {
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify(KP.state));
@@ -229,18 +320,71 @@
   };
 
   KP.load = function () {
-    try {
-      const raw = localStorage.getItem(SAVE_KEY);
-      if (!raw) return null;
-      const st = JSON.parse(raw);
-      if (!st || st.v !== 1) return null;
-      KP.state = st;
-      return st;
-    } catch (e) { return null; }
+    let raw;
+    try { raw = localStorage.getItem(SAVE_KEY); } catch (e) { return null; }
+    if (!raw) return null;
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch (e) { return null; }
+    const r = KP.migrate(parsed);
+    if (!r.ok) return null;
+    KP.state = r.state;
+    if (r.migrated) KP.save();          // pay the upgrade once, not every load
+    return r.state;
   };
 
   KP.wipe = function () {
     try { localStorage.removeItem(SAVE_KEY); } catch (e) { }
     KP.state = null;
+  };
+
+  /* ------------------------------ save files ------------------------------- */
+  /* The download is wrapped in an envelope so a file can be identified on sight
+     — by a human reading it and by an importer that has to reject other JSON.
+     The envelope version is separate from the state version: the two can move
+     independently, and the state carries its own `v` regardless. */
+  KP.EXPORT_FMT = 1;
+
+  KP.exportSave = function () {
+    const st = KP.state;
+    if (!st) return null;
+    const env = {
+      app: 'idol-empire',
+      fmt: KP.EXPORT_FMT,
+      stateVersion: st.v,
+      savedAt: new Date().toISOString(),
+      label: st.company.name + ' · Y' + st.year + ' W' + st.week,
+      state: st
+    };
+    const slug = (st.company.name || 'agency').replace(/[^A-Za-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '').toLowerCase() || 'agency';
+    return {
+      json: JSON.stringify(env, null, 2),
+      filename: 'idol-empire-' + slug + '-y' + st.year + 'w' + st.week + '.json'
+    };
+  };
+
+  /* Accepts an envelope, or a bare state object — a raw localStorage dump is a
+     save a player can plausibly end up holding, and refusing it would be pure
+     pedantry. An envelope from a *newer* build is still unwrapped: its state
+     carries its own version and KP.migrate is the one that gets to judge it. */
+  KP.importSave = function (text) {
+    let raw;
+    try { raw = JSON.parse(text); }
+    catch (e) { return { ok: false, msg: 'That file is not valid JSON.' }; }
+
+    let state = raw;
+    if (raw && typeof raw === 'object' && raw.state) {
+      if (raw.app && raw.app !== 'idol-empire') {
+        return { ok: false, msg: 'That save belongs to a different game.' };
+      }
+      state = raw.state;
+    }
+
+    const r = KP.migrate(state);
+    if (!r.ok) return r;
+
+    KP.state = r.state;
+    KP.save();
+    return { ok: true, state: r.state, migrated: r.migrated, from: r.from };
   };
 })();

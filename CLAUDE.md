@@ -82,10 +82,25 @@ releases are merged into it in `buildChart()` and ranked together.
 
 ### Save format
 
-`localStorage` key `idol_empire_save_v1`, gated on `st.v === 1` — `KP.load()` returns
-`null` for anything else, silently dropping the save. New state fields should be
-back-filled lazily on read (see `ensureMarket()`) rather than bumping `v`, unless the
-shape genuinely breaks. Autosave happens at the end of every tick and after debut/release.
+`localStorage` key `idol_empire_save_v1`; autosave at the end of every tick and after
+debut/release. `KP.exportSave()` also writes a downloadable envelope
+(`{app, fmt, stateVersion, savedAt, label, state}`) and `KP.importSave()` reads one back
+— including a bare state object, since a raw localStorage dump is a file players end up
+holding.
+
+Because a downloaded save outlives the build that wrote it, there are two distinct ways
+to change the state shape, and picking the wrong one breaks old files:
+
+- **Additive** (a new field with a sane default) → add it to `normalise()` in `state.js`.
+  No version bump; old saves get back-filled on the way in. `ensureMarket()` is the same
+  idea done lazily in the engine.
+- **Breaking** (a field changes meaning, shape or units) → bump `SAVE_V` *and* add the
+  matching rung to `KP.migrations`, where `migrations[n]` upgrades a `v=n` state to
+  `v=n+1`. A missing rung is a hard, reported failure, never a silent pass.
+
+Everything funnels through `KP.migrate()`, which works on a copy: a rejected file leaves
+the run in progress untouched, and both `KP.load()` and `KP.importSave()` go through it,
+so a save carried over in `localStorage` migrates exactly like an imported file.
 
 ## Conventions
 

@@ -16,7 +16,12 @@ Opening `index.html` directly with `file://` also works in most browsers (all sc
 are plain `<script>` tags, no modules, no build step), but some browsers block
 `localStorage` on `file://`, which disables saving. The local server is the safe option.
 
-Saves live in `localStorage` under `idol_empire_save_v1` and autosave every week.
+Saves live in `localStorage` under `idol_empire_save_v1` and autosave every week. The
+agency menu (`⋯`) can also download the run as a JSON file and load one back — including
+on the title screen, so a save moves between browsers. Files written by older versions
+stay importable: additive fields are back-filled on read, and a breaking change adds a
+rung to the migration ladder in `js/state.js`. A save from a *newer* build is refused with
+a message rather than half-loaded.
 
 ## Controls
 

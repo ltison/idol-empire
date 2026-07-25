@@ -46,6 +46,52 @@
     else ui.toast('That save could not be read.', 'bad');
   });
 
+  /* ------------------------------ save files ------------------------------- */
+
+  function downloadSave() {
+    const out = KP.exportSave();
+    if (!out) return ui.toast('There is no run to download yet.', 'bad');
+    const url = URL.createObjectURL(new Blob([out.json], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = out.filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // Revoking immediately can cancel the download in some browsers.
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    ui.toast('Saved to ' + out.filename, 'good');
+  }
+
+  /* The same input serves the title screen and the in-game menu. Clearing value
+     first means re-picking the same file still fires change. */
+  function pickSaveFile() {
+    const input = $('#file-save');
+    input.value = '';
+    input.click();
+  }
+
+  $('#file-save').addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const r = KP.importSave(String(reader.result));
+      if (!r.ok) return ui.toast(r.msg, 'bad');
+      ui.closeModal();
+      ui.tab = 'dash';
+      showGame();
+      ui.toast(r.migrated
+        ? 'Save imported and upgraded from format v' + r.from + '.'
+        : 'Save imported — ' + KP.state.company.name + ', Y' + KP.state.year + ' W' + KP.state.week + '.', 'good');
+      if (KP.state.over) ui.gameOver();
+    };
+    reader.onerror = () => ui.toast('That file could not be read.', 'bad');
+    reader.readAsText(file);
+  });
+
+  $('#btn-import').addEventListener('click', pickSaveFile);
+
   /* -------------------------------- topbar --------------------------------- */
 
   $('#nav').addEventListener('click', (e) => {
@@ -167,6 +213,8 @@
       const ok = KP.save();
       ui.toast(ok ? 'Saved.' : 'Saving is blocked in this browser.', ok ? 'good' : 'bad');
     },
+    'menu-export'() { downloadSave(); },
+    'menu-import'() { pickSaveFile(); },
     'menu-quit'() { KP.wipe(); ui.closeModal(); showStart(); },
     'modal-close'() { ui.closeModal(); },
     'modal-bg'(d, e) { if (e.target.classList.contains('modal-bg')) ui.closeModal(); }
