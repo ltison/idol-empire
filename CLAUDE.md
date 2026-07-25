@@ -135,7 +135,10 @@ to change the state shape, and picking the wrong one breaks old files:
   `st.knownRivals` (`{}`), `st.awards` (`[]`), `st.pendingAwards` (`null`) and the
   per-group `g.trophies` (`[]`). An empty yearbook is a valid state: the first ceremony
   after loading an older file judges whatever the accumulator collected from the load
-  point on, which is an honest degradation rather than a crash.
+  point on, which is an honest degradation rather than a crash. The per-trainee
+  `t.face` (`null`) went in the same way, with one wrinkle worth keeping: its back-fill
+  is *derived* from `U.hue(t.id)`, not rolled, because a random default would hand the
+  same save a different roster of faces on every single load.
 
 A record with two calendars on it, which nobody should tidy: on `g.releases[]`, **`y`/`w`
 mean the week promotions *wrapped*** (they always did, and 4–7 weeks after the fact),
@@ -211,6 +214,12 @@ anything that stretches the term (the miss branch) re-derives `weeksLeft` from
 - A prize is a data entry: `KP.awards.prizes` says what it is worth and
   `KP.awards.score[k]` is the weighted sum of the year's record that decides it, read
   generically by `ballotScore()` the way `KP.traits` is read by `traitMul()`.
+- A portrait is addressed by index, never by filename. `KP.faces.count` in `data.js` is
+  the only number to touch when the pool grows and `KP.faces.src()` the only place a path
+  is built; `count: 0` disables portraits and every avatar falls back to the gradient
+  monogram, so `img/faces/` is optional art rather than a dependency. `avatar()` in
+  `ui.js` paints it as a background layer rather than an `<img>` on purpose — `render()`
+  rebuilds `#stage` on every click, and a fresh node each redraw flashes.
 - `css/style.css` is the whole visual system, tokens in `:root`. `--accent` is overridden
   per group card so a group renders in its own lightstick colour. Gold (`--gold`) is
   reserved for wins only — trophies, #1, all-kill. `prefers-reduced-motion` is respected.

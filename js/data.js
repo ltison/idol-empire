@@ -89,6 +89,35 @@ KP.names = {
     '민호', '지성', '태현', '서준', '도윤', '현우', '재민', '성호', '준서', '연준']
 };
 
+/* ------------------------------ portrait pool ----------------------------
+   A save stores a portrait as the key `f37`, never as a filename: the path is
+   built here and nowhere else, so re-exporting the art at a different size or
+   format stays a one-line change instead of a breaking save change.
+
+   `count` is the only number to touch when the pool grows. Zero turns
+   portraits off entirely and every avatar falls back to its gradient
+   monogram — the game is playable with an empty img/faces/. */
+KP.faces = {
+  count: { f: 150, m: 150 },
+  ext: 'webp',
+
+  /* A key off a downloaded save is untrusted input, so this validates rather
+     than interpolates: the bucket must be one of two literals and the index
+     must be a number, which makes the returned path unescapable by
+     construction. Anything else renders as no photo at all. */
+  src(key) {
+    if (typeof key !== 'string' || key.length < 2) return null;
+    const g = key[0], n = parseInt(key.slice(1), 10);
+    const total = this.count[g] || 0;
+    if ((g !== 'f' && g !== 'm') || !total || !isFinite(n) || n < 0) return null;
+    // Modulo keeps an old save renderable if the pool ever shrinks: an index
+    // past the end wraps instead of 404ing into a broken image. Growing the
+    // pool leaves every existing index pointing at the same file, which is
+    // why generation picks inside the current count rather than unbounded.
+    return `img/faces/${g}/${String(n % total).padStart(3, '0')}.${this.ext}`;
+  }
+};
+
 KP.nations = [
   { c: 'KR', flag: '🇰🇷', name: 'Korea', w: 62 },
   { c: 'JP', flag: '🇯🇵', name: 'Japan', w: 12 },

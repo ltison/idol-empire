@@ -21,6 +21,15 @@
     return U.chance(.55) ? given : U.pick(KP.names.surname) + ' ' + given;
   }
 
+  /* A portrait key, drawn inside the pool that exists right now. Picking
+     within the current count rather than unbounded is what makes adding art
+     later safe: every key already handed out still addresses the same file.
+     With no pool installed this returns null and the avatar stays a monogram. */
+  KP.faceKey = function (gender) {
+    const total = (KP.faces.count[gender] || 0);
+    return total ? gender + U.irnd(0, total - 1) : null;
+  };
+
   /* quality 0..1 nudges both the floor and the ceiling of a generated trainee */
   KP.makeTrainee = function (quality) {
     const q = U.clamp(quality == null ? Math.random() : quality, 0, 1);
@@ -52,6 +61,7 @@
       id,
       name: stageName(gender),
       kr: U.pick(KP.names.korean),
+      face: KP.faceKey(gender),
       age: U.irnd(15, 22),
       nation: nation.c,
       flag: nation.flag,
@@ -459,6 +469,20 @@
       { releases: 0, wins: 0, no1: 0, stages: 0, varietyShows: 0, lives: 0, tickets: 0 }, st.stats);
     st.trends = st.trends || {};
     KP.concepts.forEach(c => { if (typeof st.trends[c.k] !== 'number') st.trends[c.k] = 50; });
+    // Portraits are additive: a file written before the pool existed carries no
+    // face, and gets one derived from the id rather than rolled. Derived, so a
+    // given trainee wears the same face on every load of the same save — a
+    // random back-fill here would reshuffle the whole roster on each reload.
+    // The bucket is the agency's, since that is what generated the roster.
+    // U.hue() tops out at 359, so a pool grown past 360 would leave the art
+    // above that index unreachable *here* — only on this back-fill path, since
+    // KP.faceKey() draws across the whole pool. Widen the hash before the pool
+    // ever gets that big.
+    st.trainees.forEach(t => {
+      if (typeof t.face === 'string' || t.face === null) return;
+      const g = st.company.gender, total = KP.faces.count[g] || 0;
+      t.face = total ? g + (U.hue(t.id) % total) : null;
+    });
     st.groups.forEach(g => {
       if (!Array.isArray(g.releases)) g.releases = [];
       if (typeof g.momentum !== 'number') g.momentum = 0;

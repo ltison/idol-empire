@@ -186,6 +186,23 @@ Rival agencies that sign the trainees you passed on, debut competing groups, and
 your comeback week. A named rival roster you can scout, and a "who debuted this month"
 rookie race.
 
+Also in this sprint: **portraits**, because "with faces" ought to be literal. A pool of
+generated head-and-shoulders portraits under `img/faces/<gender>/NNN.webp`, one shared
+studio style, addressed by index. Three rules hold it together:
+
+- A save stores the key `f37`, never a filename. `KP.faces.src()` in `data.js` is the
+  only place a path is built, so re-exporting the art at another size or format is a
+  one-line change instead of a breaking save change.
+- `t.face` is additive — `normalise()` back-fills an older file from `U.hue(t.id)`, so
+  the same save shows the same roster on every load. It is derived rather than rolled
+  precisely so a reload cannot reshuffle everyone's face.
+- `KP.faces.count` at `0` turns portraits off and every avatar falls back to the
+  gradient monogram. The game stays playable with an empty `img/faces/`, which is what
+  keeps the art optional rather than a load-bearing dependency.
+
+Portraits land here rather than in Sprint 6 because they are the cheap half of that
+sprint's "per-group visual identity" and the rival roster reads better with faces on it.
+
 **Sprint 4 — the fandom as a system**
 Fandom loyalty and sentiment separate from size, international vs domestic split,
 world tours, streaming platform deals, scandals with a management minigame

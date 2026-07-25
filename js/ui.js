@@ -15,7 +15,20 @@
     const h = U.hue(t.id);
     const bg = `linear-gradient(135deg, hsl(${h} 90% 66%), hsl(${(h + 58) % 360} 88% 58%))`;
     const initial = U.esc(t.name.trim()[0] || '?');
-    return `<div class="ava ${cls || ''}" style="background:${bg}">${initial}<span class="ava-flag">${t.flag}</span></div>`;
+    const src = KP.faces.src(t.face);
+    // The portrait is a background layer over the gradient, not an <img>, because
+    // ui.render() replaces #stage wholesale on every click: a fresh <img> node
+    // each redraw re-decodes and flashes, a repainted background does not. The
+    // gradient stays underneath as the fallback for an empty pool and as the
+    // placeholder while the file loads, so a missing portrait degrades to the
+    // monogram this game shipped with rather than to a hole.
+    // url() goes unquoted: the attribute is delimited by double quotes, so a
+    // quoted url() inside it would close the attribute early and cost the tile
+    // both its photo and its gradient. The path is built from a bucket letter
+    // and an integer, so it needs no quoting to survive.
+    return `<div class="ava ${src ? 'ava-photo ' : ''}${cls || ''}" ` +
+      `style="background-image:${src ? `url(${src}),` : ''}${bg}">${
+      src ? '' : initial}<span class="ava-flag">${t.flag}</span></div>`;
   }
 
   function statRows(t) {

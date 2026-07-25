@@ -245,6 +245,11 @@ kbd{
   background:var(--ink-2); border-radius:6px; padding:2px; border:1px solid var(--stroke);
 }
 .ava.lg{ width:58px; height:58px; font-size:19px; border-radius:17px; }
+/* Portraits are framed head-and-shoulders, so the crop is pulled above centre
+   to keep the face in the tile rather than the collar. No `color:transparent`
+   here: avatar() already omits the monogram when there is a photo, and the
+   nationality badge is a child that would inherit it and lose its flag. */
+.ava-photo{ background-size:cover; background-position:50% 16%; }
 
 /* ==========================================================================
    DASHBOARD
