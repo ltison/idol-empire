@@ -1,3 +1,8 @@
 .playwright-mcp/
 .claude/
 .DS_Store
+
+# The test harness lives next to the game but is not part of it — the game ships
+# with no dependencies, no build step and nothing to install, and that stays true.
+# See test/README.md.
+test/
