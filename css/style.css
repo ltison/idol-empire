@@ -182,6 +182,10 @@ kbd{
   font-style:normal; margin-left:auto; font-family:var(--mono); font-size:10px;
   padding:1px 6px; border-radius:20px; background:rgba(255,255,255,.07); color:var(--muted);
 }
+/* A badge with nothing in it is still a pill, and an empty pill reads as a dash
+   sitting where a number should be. render() clears these to '' rather than
+   removing the node, so the hiding is done here. */
+.rail-btn em:empty{ display:none; }
 .rail-btn:hover{ color:var(--text); background:var(--panel); }
 .rail-btn.is-on{ color:var(--text); background:rgba(255,46,134,.13); box-shadow:inset 2px 0 0 var(--pink); }
 .rail-btn.is-on span{ color:var(--pink); }

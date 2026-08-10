@@ -114,12 +114,16 @@
     if (st.over) return ui.gameOver();     // a finished run always says so, never just ignores you
     const recap = KP.engine.nextWeek() || [];
     ui.render();
-    // There is one modal root, so the three things that want it are ranked: a
-    // dead run outranks a ceremony, and a ceremony outranks the weekly toasts.
+    // There is one modal root, so the four things that want it are ranked: a
+    // dead run outranks a ceremony, a ceremony outranks a scandal, and a scandal
+    // outranks the weekly toasts. Nothing is lost by being outranked — the story
+    // stays in st.scandal with its own banner on the Fandom tab and its own week
+    // to be answered in.
     if (st.over) return ui.gameOver();
     const awardYear = KP.engine.claimAwards(st);
     // Saved before it is shown, so a closed tab cannot make it happen twice.
     if (awardYear != null) { KP.save(); return ui.openAwards(awardYear); }
+    if (st.scandal) return ui.openScandal();
     recap.slice(0, 3).forEach((r, i) =>
       setTimeout(() => ui.toast(r.ic + '  ' + r.text, r.kind), i * 220));
   }
@@ -130,7 +134,13 @@
     const st = KP.state;
     if (!st || st.over) return;
     const y = KP.engine.claimAwards(st);
-    if (y == null) return;
+    if (y == null) {
+      // A run reopened in the middle of a story still owes the player the
+      // decision — and still has the week it broke in to make it, because the
+      // silence outcome is applied by the tick and not by the clock.
+      if (st.scandal) ui.openScandal();
+      return;
+    }
     KP.save();
     ui.openAwards(y);
   }
@@ -175,6 +185,26 @@
       if (!r.ok) return ui.toast(r.msg, 'bad');
       ui.toast('Recovered ' + KP.util.money(r.back) + ' — weekly costs are lower now.', 'good');
       ui.render();
+    },
+
+    /* ---- the fandom ---- */
+    'open-scandal'() { ui.openScandal(); },
+    'scandal-pick'(d) {
+      const r = KP.engine.scandalRespond(KP.state, d.key);
+      if (!r.ok) return ui.toast(r.msg, 'bad');
+      ui.closeModal();
+      ui.render();
+      KP.save();                    // an answer given is an answer given
+      ui.toast(r.weeks
+        ? 'Statement filed — they are off the schedule for ' + r.weeks + ' weeks.'
+        : 'Answered. ' + U.num(r.lost) + ' fans gone.', r.swing < -10 ? 'bad' : '');
+    },
+    'deal-take'(d) {
+      const r = KP.engine.takeDeal(KP.state, d.key);
+      if (!r.ok) return ui.toast(r.msg, 'bad');
+      ui.render();
+      KP.save();                    // signed money must survive a closed tab
+      ui.toast(U.money(r.net) + ' advance received.', 'big');
     },
 
     'scout-rival'(d) {
@@ -322,7 +352,7 @@
     if ($('#modal-root').children.length) return;
     if (e.key === 'n' || e.key === 'N') { e.preventDefault(); advanceWeek(); }
     // Same order as the .rail-btn list in index.html and ui.js's views map.
-    const tabs = ['dash', 'trainees', 'scout', 'groups', 'sched', 'chart', 'rivals', 'log'];
+    const tabs = ['dash', 'trainees', 'scout', 'groups', 'sched', 'chart', 'rivals', 'fandom', 'log'];
     const i = parseInt(e.key, 10);
     if (i >= 1 && i <= tabs.length) { ui.tab = tabs[i - 1]; ui.render(); }
   });

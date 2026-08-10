@@ -28,7 +28,7 @@ a message rather than half-loaded.
 | Key | Action |
 |---|---|
 | `N` | Advance one week |
-| `1`–`8` | Jump to Office / Trainees / Scouting / Groups / Schedule / Chart / Rivals / Feed |
+| `1`–`9` | Jump to Office / Trainees / Scouting / Groups / Schedule / Chart / Rivals / Fandom / Feed |
 | `Esc` | Close a dialog |
 
 ---
@@ -236,12 +236,69 @@ studio style, addressed by index. Three rules hold it together:
   gradient monogram. The game stays playable with an empty `img/faces/`, which is what
   keeps the art optional rather than a load-bearing dependency.
 
-## Backlog — what the next sprints add
+## Sprint 4 — shipped
 
-**Sprint 4 — the fandom as a system**
-Fandom loyalty and sentiment separate from size, international vs domestic split,
-world tours, streaming platform deals, scandals with a management minigame
-(statement, hiatus, denial), sasaeng and antifan pressure on member morale.
+A fandom used to be one number that only ever went up. Now it has a **shape**, and
+three of its numbers are things you manage rather than watch: who actually buys, what
+everybody else thinks, and how much of the crowd is not at home. An eighth tab, `♥ Fandom`.
+
+**The three numbers**
+- **Loyalty** — who buys, votes and turns up. Built by *going out*: a fan meeting, a
+  variety slot, a stage, a run that peaked top three. Spent by *growing* — every new fan
+  arrives at 30 loyalty and is averaged into everybody already there, so the fancam that
+  doubles your fandom leaves you with a shallower one. It multiplies album sales, merch
+  and ticket demand
+- **Public sentiment** — what the people who are *not* fans think. It decides how fast
+  strangers convert and how a comeback is received before anybody has heard it. It settles
+  in a narrow band off momentum and standing; above that band it has to be bought a
+  variety booking and a trophy at a time, and below it is where a scandal puts you
+- **International share** — home fans buy albums and vote, overseas fans stream, pay a
+  premium for goods, and are the only people a world tour can sell a seat to. Moving the
+  split trades one business for the other: at 60% overseas your physical sales are down a
+  fifth and your streaming is up a third
+- Every modifier is written as a deviation from where the simulation says a group
+  *settles*, so a brand-new group's six multipliers all read exactly ×1.00 and the sprint
+  changes nothing on day one. Measured over ten in-game years against the Sprint 3 build,
+  the same seeds and the same play end within ~8% on fandom and cash
+
+**World tours** — a fourth column on the booking board
+- Two routings, 3 and 5 legs, booked and paid for as one commitment and resolved a leg at
+  a time on consecutive weeks the group cannot be anywhere else
+- Gated on the international share rather than reputation, and priced like every venue:
+  a group sitting exactly on both gates with cold modifiers comes in *under* break-even.
+  The routing you have just unlocked is the one you lose money on
+- Cancelling pulls the whole tour. Every leg played raises the international share for
+  good, which is the half a platform deal cannot buy
+
+**Streaming platform deals**
+- Three terms, from a domestic playlist push to a global exclusive: an advance the week
+  you sign, a commitment fee in the weekly books every week after, and a multiplier on
+  streaming revenue and nothing else — so a deal signed with nothing out is a bill
+- They drag the fandom overseas while they run, and when the term ends the books say
+  whether it paid for itself. There is no buyout
+
+**Scandals** — the one thing in the game that asks you a question and waits
+- Five kinds, from an airport clip to a bullying allegation, each either true or not.
+  Fame is what attracts them: the roll is weighted by the same pressure number the
+  sasaeng incidents are
+- Four answers. A **statement** costs money and settles it either way. A **denial** is
+  free, wins outright when the story is false and the fandom loves a fight — and comes
+  back weeks later, far worse, when it was true. A **hiatus** protects the public mood
+  best and costs the schedule a member for weeks. **Say nothing** and the week answers
+  for you, which is the worst of the four and the one you get by closing the tab
+- You are never told the truth. Your marketing lead gives you a read, right about half
+  the time at Lv1 and four times in five at Lv5, and it is rolled once when the story
+  breaks so a redraw cannot shop for a better opinion
+- The Sprint 1 "dating rumour" event is gone: it is one of the five scandal kinds now, so
+  the thing that used to happen *to* you is a decision you get to make badly
+
+**Sasaeng and antifan pressure**
+- Fame buys an audience that does not go home, and low sentiment multiplies it. Above a
+  threshold it drains morale every week and somebody has a bad week on a roll
+- The dormitory is the only thing that buys it back, which is a second job for a building
+  that used to only speed up recovery
+
+## Backlog — what the next sprints add
 
 **Sprint 5 — depth on people**
 Member relationships and unit chemistry, sub-units, solo debuts, contract renewals and

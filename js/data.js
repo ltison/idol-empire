@@ -450,24 +450,28 @@ KP.bookings = {
             on until something else is going right.
    rep      the gate, read off KP.standing() like every other gate.
    stamina  flat, per member present, as with any other booking.
-   cooldown weeks before this group may play this tier again. */
+   cooldown weeks before this group may play this tier again.
+   loyal    loyalty the night buys. Deliberately upside-down against every other
+            number here: a fan meeting is a hi-touch line and a dome is a screen
+            two hundred metres away, so the room that makes the least money is
+            the room that makes the fandom. */
 KP.venues = [
   { k: 'fanmeet', name: 'Fan meeting', kr: '팬미팅',
     desc: 'A hall, a hi-touch line, and merchandise tables',
     cap: 1500, cost: 26e6, ticket: 42000, pull: .120,
-    rep: 0, fans: 5e3, stamina: 9, cooldown: 4, repGain: .4, morale: 6 },
+    rep: 0, fans: 5e3, stamina: 9, cooldown: 4, repGain: .4, morale: 6, loyal: 3 },
   { k: 'hall', name: 'Solo concert', kr: '단독 콘서트',
     desc: 'Your own two-hour set list in a concert hall',
     cap: 5000, cost: 130e6, ticket: 62000, pull: .0625,
-    rep: 15, fans: 32e3, stamina: 15, cooldown: 8, repGain: 1.0, morale: 3 },
+    rep: 15, fans: 32e3, stamina: 15, cooldown: 8, repGain: 1.0, morale: 3, loyal: 2.2 },
   { k: 'arena', name: 'Arena show', kr: '아레나',
     desc: 'Rigging, a B-stage, and a crew of two hundred',
     cap: 15000, cost: 520e6, ticket: 78000, pull: .0400,
-    rep: 32, fans: 150e3, stamina: 21, cooldown: 14, repGain: 2.4, morale: 1 },
+    rep: 32, fans: 150e3, stamina: 21, cooldown: 14, repGain: 2.4, morale: 1, loyal: 1.6 },
   { k: 'dome', name: 'Dome concert', kr: '돔 공연',
     desc: 'The show an agency is remembered for. Or bankrupted by',
     cap: 45000, cost: 1700e6, ticket: 92000, pull: .0321,
-    rep: 55, fans: 560e3, stamina: 28, cooldown: 26, repGain: 6.0, morale: -2 }
+    rep: 55, fans: 560e3, stamina: 28, cooldown: 26, repGain: 6.0, morale: -2, loyal: 1.2 }
 ];
 
 /* The modifier stack on attendance, and the roll on top of it. Every one of
@@ -499,6 +503,224 @@ KP.live = {
   pullMomentum: -12
 };
 
+/* =========================== the fandom as a system ========================
+   A fandom used to be one number. These three say what KIND of fandom it is,
+   and every one of them is a lever the player pulls with something they already
+   do rather than a slider they set:
+
+     loyal   0–100. What share of the crowd actually buys, votes and shows up.
+             Built by going out — a fan meeting, a variety slot, a stage — and
+             spent by growing: every new fan arrives at `newFanLoyal` and is
+             averaged in, so a fandom that doubles on one viral clip is a
+             shallower fandom the week after.
+     senti   0–100. What everybody ELSE thinks, which is a different question.
+             Decides how fast strangers become fans and how a comeback lands;
+             it is the number a scandal destroys and the one a trophy buys.
+     intl    0–1. The share of the fandom that is not domestic. Home fans buy
+             albums; international fans stream, pay a merch premium and are the
+             only reason a world tour can sell a seat. Moving the split is a
+             strategy rather than an upgrade.
+
+   Every multiplier below is written as a DEVIATION from the starting values, so
+   a brand-new group's modifiers are all exactly 1.00 and nothing in the economy
+   moves on day one. What changes is everything that happens after. */
+KP.fandom = {
+  loyal0: 55, senti0: 60, intl0: .12,
+
+  /* Growth dilutes. A brand-new fan is worth `newFanLoyal` and is averaged into
+     the loyalty of everybody already there, which is what makes a percentage
+     spike — a fancam, a viral variety week — cost something real. */
+  newFanLoyal: 30,
+  loyalBase: 46,           // where loyalty settles with nothing being done
+  loyalDrift: .045,
+  quietFrom: 20,           // weeks since the last release before the fandom sags
+  quietLoyal: .45,         // ...and the loyalty each quiet week costs on top
+
+  /* Sentiment settles at base + momentum + standing: 48 for a young group, ~54
+     mid-career, 62 for the best agency in the game. The span is deliberately
+     narrow. Written the first way round — 46 + momentum×.22 + standing×.12 —
+     every successful run parked on 80 within two years, which turned every
+     modifier keyed to sentiment into a permanent bonus for already being
+     successful: measured, ~12% on fan acquisition every single week, which
+     compounds into three times the fandom over five years and is not a decision
+     anybody made. Sentiment above the middle has to be BOUGHT, a variety slot
+     and a trophy at a time, and it decays back. Below it is where a scandal
+     puts you, and where a young group starts. */
+  sentiBase: 46,
+  sentiMomentum: .10,
+  sentiStanding: .06,
+  sentiDrift: .09,
+
+  intlBase: .10,           // where the split settles with no deal and no tour
+  intlDrift: .06,
+  intlMv: .06,             // an overseas MV shoot raises the target while it runs
+  intlPerLeg: .02,         // ...and every tour leg ever played raises it for good
+  intlPerLegCap: .18,
+  intlCap: .85,
+
+  /* Where a modifier is worth exactly 1.00 — and deliberately NOT the same as
+     the starting values above. loyal0/senti0/intl0 are where a group begins;
+     these are where the simulation says a group SETTLES, measured over ten
+     in-game years: loyalty in the fifties unless somebody is booking rooms,
+     sentiment a few points either side of the middle of its own narrow band.
+     Anchoring the modifiers to the starting values instead makes the whole
+     sprint a standing bonus or a standing tax on everybody rather than a spread
+     between the agency that works its fandom and the one that does not. */
+  midLoyal: 55,
+  midSenti: 54,
+
+  /* Per point of loyalty above midLoyal, of sentiment above midSenti, and of
+     international share above intl0. Read in exactly one place, KP.fanMods(). */
+  salesPer: 1 / 150, salesLo: .30, salesHi: 1.5,
+  merchPer: 1 / 190, merchLo: .40, merchHi: 1.4,
+  pullPer: 1 / 230, pullLo: .50, pullHi: 1.35,
+  acqPer: 1 / 170, acqLo: .35, acqHi: 1.4,
+  hypePer: 1 / 450, hypeLo: .80, hypeHi: 1.15,
+  intlMerch: .55,          // international fans pay a premium for goods
+  intlStream: .80,         // ...and stream far more
+  intlAlbum: -.45,         // ...and buy far fewer physical albums
+
+  /* What being visible is worth in loyalty. Small rooms build a fandom and big
+     ones spend it: a fan meeting is a hi-touch line, a dome is a screen two
+     hundred metres away. */
+  loyalStage: .25,
+  loyalVariety: .9,
+  loyalHit: 2,             // a promotion run that peaked top 3
+  loyalTrophy: 2,
+
+  /* Sasaeng and antifan pressure. Fame buys it, low sentiment multiplies it, and
+     the dormitory is what buys it back — the dorm's second job, and the reason a
+     bigger building is worth more than faster recovery. */
+  pressFameExp: .30, pressFameDiv: 1.6, pressFameCap: 60,
+  pressAntiFrom: 55, pressAnti: .6,
+  pressDorm: 7,
+  pressFloor: 22,          // below this, nobody is camping outside
+  pressRoll: 1000,         // per member, per week: pressure ÷ this
+  pressMorale: [4, 12],
+  pressDrag: 60            // the flat weekly morale cost of being watched
+};
+
+/* ------------------------------- world tours ------------------------------
+   A venue is one night. A tour is `legs` consecutive weeks, booked and paid for
+   as one commitment and resolved a leg at a time on the same board as
+   everything else — so a tour occupies the weeks it actually eats and the
+   stamina bill arrives once per leg.
+
+   The gate is `intl` and not reputation: nobody flies a group to six countries
+   because the domestic chart likes them. Attendance is drawn from the
+   international half of the fandom alone (`pull` applies to fans × intl), which
+   is what makes the split a decision rather than a statistic.
+
+   `pull` follows the same rule KP.venues does and is calibrated the same way: a
+   group sitting exactly on both gates, with cold modifiers, comes in just UNDER
+   break-even. The routing you have only just unlocked is the routing you lose
+   money on until something else is going right — an active comeback, momentum,
+   standing, a loyal fandom or the season. */
+KP.tours = [
+  { k: 'asia', name: 'Asia tour', kr: '아시아 투어',
+    desc: 'Three cities, one crew, and a lot of customs paperwork',
+    legs: 3, cap: 8000, cost: 210e6, ticket: 88000, pull: .112,
+    rep: 20, fans: 120e3, intl: .16, stamina: 14, cooldown: 30,
+    repGain: 2.0, morale: 2, loyal: 1.2 },
+  { k: 'world', name: 'World tour', kr: '월드 투어',
+    desc: 'Five continents. The thing an agency is remembered for',
+    legs: 5, cap: 20000, cost: 900e6, ticket: 105000, pull: .082,
+    rep: 42, fans: 400e3, intl: .25, stamina: 19, cooldown: 52,
+    repGain: 5.0, morale: -1, loyal: 1.6 }
+];
+
+/* --------------------------- streaming platforms --------------------------
+   The other way to move the split, and the opposite risk shape to a tour: a
+   tour is paid for once and earns on the night, a platform deal pays an advance
+   the week it is signed and then bills every week for the whole term. The
+   multiplier lands on streaming revenue only — the money that keys off chart
+   points — so a deal signed by an agency with nothing out is a weekly bill and
+   nothing else. */
+KP.platforms = [
+  { k: 'push', name: 'Domestic playlist push', kr: '국내 플랫폼',
+    desc: 'Front page at home, every Friday, for half a year',
+    advance: 150e6, weekly: 12e6, weeks: 26, streamMul: 1.15, intlPull: .06,
+    rep: 0, fans: 20e3 },
+  { k: 'jp', name: 'Japan platform deal', kr: '일본 플랫폼',
+    desc: 'A local label partner, a local release, a local audience',
+    advance: 600e6, weekly: 30e6, weeks: 40, streamMul: 1.12, intlPull: .34,
+    rep: 18, fans: 90e3 },
+  { k: 'global', name: 'Global platform exclusive', kr: '글로벌 독점',
+    desc: 'Editorial playlisting in forty markets, and their lawyers wrote it',
+    advance: 1800e6, weekly: 85e6, weeks: 52, streamMul: 1.32, intlPull: .58,
+    rep: 38, fans: 300e3 }
+];
+
+KP.deals = {
+  maxDeals: 2,
+  exitRep: 4,              // it paid for itself...
+  exitRepBad: 3            // ...and it did not
+};
+
+/* ------------------------------- scandals ---------------------------------
+   The only thing in the game that asks the player a question and then waits. A
+   story runs, it is either true or it is not, and the agency has one week to
+   answer — after which silence is itself an answer, resolved by the engine
+   rather than left pending forever.
+
+   The player is never told the truth outright. What they get is a PR read from
+   the marketing lead, right `read.base + marketing × read.marketing + standing ÷
+   read.standing` of the time, and rolled ONCE when the story breaks so that a
+   redraw cannot re-roll the advice. What a response is worth is a multiple of
+   the story's severity, and the pair is [if true, if false] — denial is the
+   aggressive play that wins outright when the story is wrong and detonates
+   weeks later when it is right. */
+KP.scandals = [
+  { k: 'dating', name: 'Dating scandal', kr: '열애설', ic: '📰',
+    desc: 'A photo set, a car park, and a timestamp',
+    trueP: .55, sev: [8, 18] },
+  { k: 'attitude', name: 'Airport attitude clip', kr: '태도 논란', ic: '📹',
+    desc: 'Eleven seconds, no audio, four million views',
+    trueP: .70, sev: [5, 12] },
+  { k: 'plagiarism', name: 'Choreography plagiarism claim', kr: '표절 논란', ic: '🩰',
+    desc: 'A split-screen edit is going around, and it is convincing',
+    trueP: .50, sev: [7, 15] },
+  { k: 'bully', name: 'School bullying allegation', kr: '학폭 의혹', ic: '🏫',
+    desc: 'An anonymous post, a school year, and a name',
+    trueP: .35, sev: [14, 30] },
+  { k: 'contract', name: 'Contract dispute leak', kr: '계약 분쟁', ic: '📄',
+    desc: 'Somebody sent a page of the contract to a reporter',
+    trueP: .45, sev: [10, 20] }
+];
+
+KP.scandal = {
+  minFans: 25e3,
+  statementCost: 45e6,     // × severity ÷ 10
+  hiatusWeeks: [3, 7],
+  backfireIn: [3, 7],
+  fansDiv: 300,            // fans lost = fandom × severity ÷ this
+  moraleHit: [8, 20],
+  momentum: -12,
+  read: { base: .48, marketing: .09, standing: 400 },
+
+  /* Per response: the multiplier on severity [if the story is TRUE, if it is
+     FALSE] against sentiment, then the flat loyalty and reputation swing. */
+  out: {
+    statement: {
+      label: 'Issue a statement', ic: '🎙️', senti: [-.60, -.35], loyal: -2, rep: -.5,
+      desc: 'A PR firm, a press release and a bow. Costs money and settles it either way'
+    },
+    deny: {
+      label: 'Deny it outright', ic: '⚔️', senti: [-.50, -.20], loyal: 4, rep: 1,
+      desc: 'Free, and the fandom loves a fight — but a denial that turns out to be false comes back'
+    },
+    hiatus: {
+      label: 'Put them on hiatus', ic: '🚪', senti: [-.20, -.12], loyal: 3, rep: 0,
+      desc: 'The safest answer to the public and the most expensive one to the schedule'
+    },
+    silence: {
+      label: 'No comment', ic: '🤐', senti: [-1.0, -.75], loyal: -5, rep: -2,
+      desc: 'What happens on its own if the week passes without an answer'
+    }
+  },
+  backfire: { senti: -1.3, loyal: -10, rep: -4, fansPct: .06 }
+};
+
 /* The board's columns, in the order the booking modal offers them. */
 KP.bookingKinds = [
   { k: 'music', name: 'Music show', kr: '음악방송', ic: '🎵',
@@ -506,7 +728,9 @@ KP.bookingKinds = [
   { k: 'variety', name: 'Variety show', kr: '예능', ic: '🎤',
     desc: 'Fandom, reputation and variety training — no chart effect' },
   { k: 'live', name: 'Live show', kr: '공연', ic: '🎫',
-    desc: 'Your own ticketed show — the only booking that can pay for itself' }
+    desc: 'Your own ticketed show — the only booking that can pay for itself' },
+  { k: 'tour', name: 'World tour', kr: '투어', ic: '🌏',
+    desc: 'Consecutive weeks abroad, sold to the international half of your fandom' }
 ];
 
 /* ------------------------------- the market ------------------------------- */
@@ -635,6 +859,11 @@ KP.fandomSuffix = ['IE', 'LY', 'VERSE', 'LAND', 'STAR', 'MOON', 'WAVE', 'HEART',
 
 KP.positions = ['Leader', 'Main Vocal', 'Main Dancer', 'Main Rapper', 'Visual', 'Maknae', 'Sub Vocal', 'Sub Dancer'];
 
+/* Where a person can be. `injured` is something that happened to them and
+   `hiatus` is a decision the agency made about a story — they cost the schedule
+   the same thing and read completely differently in the feed. */
+KP.STATUS = ['ok', 'injured', 'hiatus'];
+
 /* ------------------------------ company setup ----------------------------- */
 KP.difficulties = {
   easy: { money: 3.0e9, rep: 12, label: 'Backed' },
@@ -709,7 +938,9 @@ KP.finance = {
   buyoutMul: 1.6,           // an investor sells their share back at 1.6× principal
   investorGoodExit: 3,      // reputation if they made money on you
   investorBadExit: 6,       // ...and lost if they did not
-  shareTags: { album: 1, stream: 1, live: 1, merch: 1, cf: 1, misc: 0 },
+  // A platform advance is income against future streams, so an investor takes
+  // their cut of it exactly as they do of the streams themselves.
+  shareTags: { album: 1, stream: 1, live: 1, merch: 1, cf: 1, deal: 1, misc: 0 },
   watchBelow: 300e6,        // the cash level a lender starts calling at
   watchMin: 100e6,          // ...and the headroom worth calling about
 

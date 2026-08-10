@@ -62,19 +62,23 @@ Engine mutators return `{ ok: false, msg }` on refusal and `{ ok: true, ... }` o
 `acts` handlers surface `msg` via `ui.toast(msg, 'bad')` and then call `ui.render()`.
 Engine functions never touch the DOM and never toast.
 
-Keyboard handling is in the same file: `N` advances a week, `1`–`8` map to the tab list.
+Keyboard handling is in the same file: `N` advances a week, `1`–`9` map to the tab list.
 Adding or reordering a tab means editing three places together: the `tabs` array in
-`main.js`, the `.rail-btn` order in `index.html`, and the `views` map in `ui.js`.
+`main.js`, the `.rail-btn` order in `index.html`, and the `views` map in `ui.js` — plus
+`TABS` in `test/game.js`, or the new screen is never rendered by the harness and its
+first NaN ships.
 
 ### The weekly tick
 
 `KP.engine.nextWeek()` is the heart of the game and runs eight numbered steps in order,
-plus five lettered ones wedged inside steps 3, 4 and 5: trends drift → training → market
+plus seven lettered ones wedged inside steps 3, 4 and 5, and a step 0 above all of them:
+**0 an unanswered scandal is answered with silence** → trends drift → training → market
 tick → **3b booked schedules resolve** → **3c the rival agencies act** → chart build →
-**3d the yearbook accrues** → group promo/decay + merch income → **4b rival groups read
-the chart** → books (`weeklyBurn` − `weeklyMisc`) → **5b debt service** → events →
-audition refresh (**and a rival poaches on the way out**) → fail state, then autosaves. An unnumbered rollover block above
-step 1 announces a new season and, on a year boundary, holds the ceremony. Ordering matters
+**3d the yearbook accrues** → group promo/decay → **4b rival groups read the chart** →
+**4c the fandom settles and then pays** → books (`weeklyBurn` − `weeklyMisc`) → **5b debt
+service** → **5c platform deals** → events → audition refresh (**and a rival poaches on
+the way out**) → fail state, then autosaves. An unnumbered rollover block above step 1
+announces a new season and, on a year boundary, holds the ceremony. Ordering matters
 for the economy — e.g. `releaseComeback` prepays the first promo week precisely because the
 final promo week clears `g.active` before step 5 bills.
 
@@ -97,6 +101,18 @@ The four ordering rules that are load-bearing rather than incidental:
   late, on a ranking nobody was warned about. 4b is the other half: the rival groups read
   the same finished ranking the player's do, off the full chart rather than the
   twenty-five rows `st.chart` keeps. Nothing in either step touches the books.
+- **4c runs after every fan gain and credits the merch line itself.** Loyalty, sentiment
+  and the international split all move in `E.fandomWeek`, and the merch credit sits
+  *inside* it rather than in step 4 — the money is keyed to numbers this step has just
+  moved, so billing it earlier would price the week before the scandal that happened in
+  it. `KP.merchWeek(g)` is the one derivation: step 4c credits it and `KP.ledger()`
+  projects it. Two copies is how a HUD starts lying about income.
+- **Step 0 answers a story nobody answered.** `st.scandal` is a question with a deadline,
+  and the deadline is the tick. Resolving it at the top of `nextWeek` — before the clock
+  moves — is what makes closing the tab a decision with one outcome rather than a modal
+  that follows the player forever, and it is why `E.scandalRespond` must never refuse a
+  free answer: gating it on `cost > money` alone is true at cost zero on a negative
+  balance, which left a broke agency permanently unable to resolve anything.
 - **3d reads the full chart, and `E.runAwards()` runs before `E.rollYear()`.** `st.chart`
   keeps twenty-five rows for one week and nothing else in the game remembers a chart ever
   happened, so `st.yearbook` is a live accumulator written while the data still exists —
@@ -104,11 +120,22 @@ The four ordering rules that are load-bearing rather than incidental:
   `st.yearbook.y` and never off `st.year`, which the rollover has already incremented;
   reversing the two calls awards an empty year, every year.
 
-Bookings come in three kinds — `music`, `variety`, `live` — sharing one board, one
+Bookings come in four kinds — `music`, `variety`, `live`, `tour` — sharing one board, one
 resolver, one modal and one cancel path. `music`/`variety` specs live in
-`KP.bookings.shows`; `live` specs are venues in `KP.venues`, because a venue is priced by
-seats rather than by an appearance fee. `KP.showSpec(kind, key)` is the seam that hides
-that split, so nothing outside `state.js` needs to know where a kind keeps its list.
+`KP.bookings.shows`; `live` specs are venues in `KP.venues` and `tour` specs are routings
+in `KP.tours`, because a venue is priced by seats rather than by an appearance fee.
+`KP.showSpec(kind, key)` is the seam that hides that split, so nothing outside `state.js`
+needs to know where a kind keeps its list, and `KP.isGig(kind)` is the one place the
+question "is this a ticketed show?" is asked — `live` and `tour` share `E.livePreview`,
+`resolveLive`, the gap rules and the `g.liveAbs` cooldown map.
+
+**A tour is one commitment stored as one record per leg**, sharing a `tourId`: the whole
+production budget leaves the balance at booking (so the "a fee is never a weekly line
+item" rule holds per leg), the board shows the consecutive weeks it really eats, step 3b
+resolves them one at a time, and `E.cancelBooking` pulls every leg of the run — a group
+stranded mid-tour with the rest of its dates cancelled is not a state the schedule should
+be able to reach. Legs are exempt from `KP.live.gap` among themselves and from nothing
+else.
 `E.livePreview()` is to a live show what `E.planPreview()` is to a release: the single
 source of truth, and `resolveLive()` applies one roll to the preview's own `expected`
 rather than recomputing anything.
@@ -176,6 +203,41 @@ the poach on a free desk instead is what quietly ended that mechanic around year
 every roster reaches the cap and stays there, and the one thing that makes an audition
 decision hurt stops happening for the rest of the run.
 
+### The fandom as a system
+
+`g.fans` is how many. `g.loyal`, `g.senti` and `g.intl` are what kind, and everything they
+are worth is derived in `KP.fanMods(g)` in `state.js` — six multipliers (sales, merch,
+pull, acq, hype, stream) that the engine spends and the Fandom tab prints. Four rules hold
+it together:
+
+- **The modifiers are anchored to `KP.fandom.midLoyal` / `midSenti`, not to the starting
+  values.** Those two constants are where the *simulation says a group settles*, measured
+  over ten in-game years, and they are deliberately not `loyal0` / `senti0`. Anchored to
+  the starting values instead, the sprint is a standing bonus for everybody rather than a
+  spread between the agency that works its fandom and the one that does not: the first
+  cut had sentiment parked at 80 within two years, worth ~12% on fan acquisition every
+  week, which compounded into three times the fandom over five years. Re-anchored and
+  re-based, the same seeds playing the same Sprint 3 game land within ~8% of the Sprint 3
+  build — which is the target. **Re-tune these by measuring, never by reasoning.**
+- **`E.gainFans()` is the only place fans are added**, and it dilutes: a newcomer arrives
+  at `newFanLoyal` and is averaged into the loyalty of everybody already there. `fanGain()`
+  stays pure because the previews quote it; `E.creditFans()` is the undamped door seat
+  sales come through. A percentage-of-the-fandom gain that skips this is a free fandom.
+- **Sentiment settles in a narrow band** (`sentiBase` + momentum + standing ≈ 48–62).
+  Above it is bought a variety slot and a trophy at a time and decays back; below it is
+  where a scandal puts you. A wide band makes the number a tax or a gift, not a decision.
+- **A scandal is state, not a modal.** `st.scandal` holds the truth (rolled once, never
+  shown), the PR read (rolled once so a redraw cannot shop for a better opinion) and the
+  severity; `E.scandalOptions()` is pure so the modal can be redrawn; `E.scandalRespond()`
+  is the single resolution path for all four answers including `silence`; and `st.fallout`
+  is a denial that was a lie, resolved weeks later in 4c. The UI only ever picks a key.
+
+A platform deal is the third facility shape after the loan and the investor, and it is
+its own: no principal, no instalment, no buyout. An advance through `E.earn(…, 'deal')`,
+a weekly commitment in `KP.ledger`'s `out.platform`, a multiplier on streaming revenue
+only, and `E.serviceDeals()` as step 5c on exactly the terms 5b has — step 5 has already
+billed the fee, so 5c only counts the term down and judges the deal on the way out.
+
 ### Save format
 
 `localStorage` key `idol_empire_save_v1`; autosave at the end of every tick and after
@@ -209,7 +271,16 @@ to change the state shape, and picking the wrong one breaks old files:
   rule for the same reason and adds one of its own: it is *derived* from `U.hue(g.id)` so
   a file does not get a different set of farewells on every load, and it is floored at a
   year out so opening a long-running save does not wind up its entire rival roster in the
-  week it is loaded.
+  week it is loaded. Sprint 4 went in the same way, and it is the clearest case of why the
+  *value* of a default matters as much as its existence: `g.loyal` / `g.senti` / `g.intl`
+  back-fill to `KP.fandom`'s starting values, which are the exact values every modifier is
+  written as a deviation from — so an older save loads into the economy it was playing in
+  and starts moving from there rather than being repriced on open. `st.company.deals`
+  (`[]`), `st.scandal` / `st.fallout` (`null`, and dropped outright when they point at a
+  group the file no longer has), the per-group `g.tourLegs` / `g.toursY` (`0`) and
+  `st.stats.tourLegs` / `st.stats.scandals` (`0`) are the rest of it. `t.status` gained a
+  third value, `hiatus`, and `normalise()` sanitises anything it does not recognise back to
+  `ok`: a file that has never heard of it simply has nobody on one.
 
 A record with two calendars on it, which nobody should tidy: on `g.releases[]`, **`y`/`w`
 mean the week promotions *wrapped*** (they always did, and 4–7 weeks after the fact),
@@ -236,7 +307,12 @@ carry drifted the moment anything new was billed.
 Two invariants hold it together:
 
 - **`totalOut` is exactly what step 5 debits.** Nothing else may be added to it, and
-  nothing in it may be billed anywhere else.
+  nothing in it may be billed anywhere else. A platform deal's weekly commitment is a line
+  item here (`out.platform`) for the same reason a loan instalment is, and 5c amortises it
+  on the same terms 5b does.
+- **An income line with two readers has one derivation.** `KP.merchWeek(g)` is credited by
+  step 4c and projected by `in.merch`; the moment the two are written separately, a
+  scandal moves one and not the other and the HUD is quoting a week that does not happen.
 - **An investor's revenue share is taken at source in `E.earn()` and must never appear in
   `totalOut`.** It is surfaced as `ledger().share` and folded into `net` for display only;
   billing it in step 5 would charge it twice, and leaving it out of `net` would make the
@@ -265,15 +341,17 @@ anything that stretches the term (the miss branch) re-derives `weeksLeft` from
   `traitAdd()` in the engine. A new trait is a data entry plus, if it needs a new effect
   path, one call site.
 - Facility/staff kinds are the strings `'fac'` and `'staff'` throughout upgrade/downgrade.
-- **Every new-fan number goes through `fanGain(g, raw)`** in `engine.js`, which damps a raw
-  gain by `1 + g.fans / KP.income.fanSaturation`. This is not decoration. Several fan
+- **Every new-fan number goes through `E.gainFans(g, raw)`** in `engine.js`, which damps a
+  raw gain by `1 + g.fans / KP.income.fanSaturation` (`fanGain`, still pure and still what
+  the previews quote) and then credits it and dilutes loyalty. This is not decoration. Several fan
   sources are written as a *share of the fandom* — a music stage is `fansPct` of it, a
   variety appearance the same, a fancam five to fourteen percent of it — and a percentage
   applied every week is compound interest. Undamped, a group with a full diary takes on
   ~13% a week, ×600 a year, and by year four the fandom and the merch income keyed to it
   are past what the number formatter can print. Damped, the percentage terms converge on a
-  constant number of new fans per week. Seat sales are already bounded by the venue and are
-  credited raw. The previews damp at the *quote* too (`E.bookPreview`): `fanGain` is linear
+  constant number of new fans per week. Seat sales are already bounded by the venue and go
+  through `E.creditFans()`, which skips the damper and dilutes anyway. The previews damp at
+  the *quote* too (`E.bookPreview`): `fanGain` is linear
   in `raw`, so quoting the raw figure and crediting the damped one is a modal that lies by
   exactly `1 + fans / fanSaturation` — a number that gets less true the better the player
   is doing.
@@ -290,6 +368,11 @@ anything that stretches the term (the miss branch) re-derives `weeksLeft` from
   behave, `KP.rivals` holds the constants every one of them shares, and `KP.rivalSpec()`
   is the only way state reaches either. Adding a fifth agency is one entry in `data.js`
   and nothing else — including for saves already in progress.
+- A tour routing, a streaming platform and a scandal are data entries, on the same terms:
+  `KP.tours`, `KP.platforms`, `KP.scandals` say what they are, `KP.fandom` / `KP.deals` /
+  `KP.scandal` hold the constants they share, and state reaches them only through
+  `KP.showSpec()`, `KP.platformSpec()` and `KP.scandalSpec()` — so a fifth scandal kind or
+  a fourth platform is one entry in `data.js`, including for saves already in progress.
 - A portrait is addressed by index, never by filename. `KP.faces.count` in `data.js` is
   the only number to touch when the pool grows and `KP.faces.src()` the only place a path
   is built; `count: 0` disables portraits and every avatar falls back to the gradient

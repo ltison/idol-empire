@@ -309,6 +309,7 @@
         facilities: { training: 1, studio: 1, dorm: 1 },
         staff: { vocal: 1, dance: 1, producer: 1, marketing: 1 },
         debts: [],          // open loans and investors, both of them
+        deals: [],          // open streaming platform deals
         prestige: 0         // permanent standing, ORDER 5's trophies write it
       },
       trainees: [],
@@ -325,9 +326,14 @@
       rivals: [],         // the four agencies, their rosters and their diaries
       awards: [],         // ceremonies, newest year first
       pendingAwards: null,// a year number the UI still owes the player a look at
+      scandal: null,      // a story the agency has one week to answer
+      fallout: null,      // a denial that was a lie, waiting to come back
       trendWeek: 0,
       trends: {},
-      stats: { releases: 0, wins: 0, no1: 0, stages: 0, varietyShows: 0, lives: 0, tickets: 0 }
+      stats: {
+        releases: 0, wins: 0, no1: 0, stages: 0, varietyShows: 0, lives: 0, tickets: 0,
+        tourLegs: 0, scandals: 0
+      }
     };
     KP.concepts.forEach(c => { st.trends[c.k] = U.irnd(35, 70); });
 
@@ -394,10 +400,19 @@
       facilities: (f.training + f.studio + f.dorm) * c.facilityWeek,
       staff: (s.vocal + s.dance + s.producer + s.marketing) * c.staffWeek,
       promo: st.groups.reduce((n, g) => n + (g.active ? g.active.promoCost : 0), 0),
-      debt: debts.reduce((n, d) => n + KP.debtInstalment(d), 0)
+      debt: debts.reduce((n, d) => n + KP.debtInstalment(d), 0),
+      // A platform deal has no instalment and no principal — it is a marketing
+      // commitment billed every week of its term, which is why it belongs here
+      // and not in the finance card.
+      platform: KP.activeDeals(st).reduce((n, d) => {
+        const sp = KP.platformSpec(d);
+        return n + (sp ? sp.weekly : 0);
+      }, 0)
     };
     const inMap = {
-      merch: st.groups.reduce((n, g) => n + g.fans * KP.income.merchPerFan, 0),
+      // One derivation, shared with step 4c. Loyalty and the international split
+      // are both inside it, so a scandal shows up in this line the same week.
+      merch: st.groups.reduce((n, g) => n + KP.merchWeek(g), 0),
       side: KP.weeklyMisc(st)
     };
     // An investor's cut is taken at the moment income is credited (E.earn), so
@@ -510,11 +525,20 @@
      the three seams the booking modal and the engine read so that neither has to
      know where a particular kind keeps its list. `live` keeps its specs in
      KP.venues because a venue is priced by seats, not by an appearance fee. */
-  KP.showSpec = (kind, key) => kind === 'live' ? KP.venue(key) : KP.show(kind, key);
+  KP.tour = (key) => KP.tours.find(t => t.k === key) || null;
+
+  KP.showSpec = (kind, key) => kind === 'live' ? KP.venue(key)
+    : kind === 'tour' ? KP.tour(key) : KP.show(kind, key);
 
   KP.bookingSpec = function (b) { return KP.showSpec(b.kind, b.show); };
 
-  KP.showsOf = (kind) => kind === 'live' ? KP.venues : (KP.bookings.shows[kind] || []);
+  KP.showsOf = (kind) => kind === 'live' ? KP.venues
+    : kind === 'tour' ? KP.tours : (KP.bookings.shows[kind] || []);
+
+  /* A tour leg is a live show with a different door: the same resolver, the same
+     grading, the same stamina bill. This is the one question the two answer
+     differently, so it is asked in one place. */
+  KP.isGig = (kind) => kind === 'live' || kind === 'tour';
 
   KP.bookingsFor = function (st, groupId, absWeek) {
     return (st.bookings || []).filter(b =>
@@ -543,6 +567,101 @@
     const mine = KP.bookingsFor(st, null, Math.round(absWeek))
       .filter(b => b.kind === kind && b.show === key).length;
     return Math.max(0, base - rivals - mine);
+  };
+
+  /* ========================= the fandom as a system ========================
+     Three numbers on a group say what kind of fandom it has, and everything
+     they are worth is derived HERE and nowhere else — the engine spends the
+     modifiers and the UI prints them, so a card can never quote a multiplier the
+     week does not apply.
+
+     Every modifier is written as a deviation from the starting values in
+     KP.fandom, which is what makes this sprint additive in the balance sense as
+     well as the save sense: a group at (55, 60, .12) has six modifiers of
+     exactly 1.00 and the economy it walks into is the one it left.
+     ====================================================================== */
+  KP.loyalOf = (g) => typeof g.loyal === 'number' ? g.loyal : KP.fandom.loyal0;
+  KP.sentiOf = (g) => typeof g.senti === 'number' ? g.senti : KP.fandom.senti0;
+  KP.intlOf = (g) => typeof g.intl === 'number' ? g.intl : KP.fandom.intl0;
+
+  KP.fanMods = function (g) {
+    const F = KP.fandom;
+    const dl = KP.loyalOf(g) - F.midLoyal;
+    const ds = KP.sentiOf(g) - F.midSenti;
+    const di = KP.intlOf(g) - F.intl0;
+    const band = (v, lo, hi) => U.clamp(v, lo, hi);
+    return {
+      // Physical albums are a domestic ritual, and a loyal fandom buys four copies.
+      sales: band(1 + dl * F.salesPer, F.salesLo, F.salesHi) * (1 + di * F.intlAlbum),
+      // Goods sell to whoever is still holding a lightstick, at an overseas premium.
+      merch: band(1 + dl * F.merchPer, F.merchLo, F.merchHi) * (1 + di * F.intlMerch),
+      // Turning up is loyalty; a tour draws on the other half of the same number.
+      pull: band(1 + dl * F.pullPer, F.pullLo, F.pullHi),
+      // What the public thinks decides how fast strangers become fans...
+      acq: band(1 + ds * F.acqPer, F.acqLo, F.acqHi),
+      // ...and how a comeback is received before anybody has heard it.
+      hype: band(1 + ds * F.hypePer, F.hypeLo, F.hypeHi),
+      stream: 1 + di * F.intlStream
+    };
+  };
+
+  /* How many of them are at home and how many are not. Rendered on the ocean and
+     read by the tour, which sells to the right-hand number alone. */
+  KP.fandomSplit = function (g) {
+    const intl = Math.round(g.fans * KP.intlOf(g));
+    return { intl, home: Math.max(0, g.fans - intl) };
+  };
+
+  /* Sasaeng and antifan pressure: fame buys it, a public that has turned on you
+     multiplies it, and the dormitory is the only thing that buys it back. Pure,
+     because the Fandom tab prints it beside the dorm level that is holding it
+     down. */
+  KP.pressure = function (st, g) {
+    const F = KP.fandom;
+    const fame = Math.min(F.pressFameCap,
+      Math.pow(Math.max(g.fans, 1), F.pressFameExp) / F.pressFameDiv);
+    const anti = Math.max(0, F.pressAntiFrom - KP.sentiOf(g)) * F.pressAnti;
+    const dorm = (st.company.facilities.dorm - 1) * F.pressDorm;
+    return U.clamp(fame + anti - dorm, 0, 100);
+  };
+
+  /* --------------------------- platform deals ------------------------------
+     A deal record stores only what changes and looks its terms up in
+     KP.platforms through KP.platformSpec(), the way a booking stores a show key
+     and a rival stores an agency key. Re-pricing a platform reaches a save that
+     is already running. */
+  KP.platformSpec = (d) => KP.platforms.find(p => p.k === (d && d.k)) || null;
+
+  KP.activeDeals = (st) => (st.company.deals || []).filter(d => d.weeksLeft > 0);
+
+  /* Every live deal's multiplier, multiplied. Read by the streaming credit in
+     promoWeek and quoted by the Fandom tab, so the two cannot disagree. */
+  KP.streamMul = function (st) {
+    return KP.activeDeals(st).reduce((m, d) => {
+      const sp = KP.platformSpec(d);
+      return m * (sp ? sp.streamMul : 1);
+    }, 1);
+  };
+
+  /* Where the platforms are dragging the split. The strongest deal wins rather
+     than the sum: two platforms do not make a fandom twice as foreign. */
+  KP.dealIntlPull = function (st) {
+    return KP.activeDeals(st).reduce((mx, d) => {
+      const sp = KP.platformSpec(d);
+      return sp ? Math.max(mx, sp.intlPull) : mx;
+    }, 0);
+  };
+
+  /* A pending scandal stores the kind, not a copy of it — same seam as a booking
+     and a rival agency, so re-writing a story's severity band reaches a save
+     that is already holding one open. */
+  KP.scandalSpec = (s) => KP.scandals.find(x => x.k === (s && s.k)) || null;
+
+  /* The weekly merch line for one group, and the ONLY derivation of it: step 4c
+     credits exactly this and KP.ledger projects exactly this. Two copies of it
+     is how a HUD starts lying about income the week loyalty moves. */
+  KP.merchWeek = function (g) {
+    return Math.round(g.fans * KP.income.merchPerFan * KP.fanMods(g).merch);
   };
 
   /* Reputation is what events move. Standing is what gates read: reputation
@@ -639,6 +758,17 @@
       if (typeof d.name !== 'string') d.name = d.type === 'loan' ? 'A loan' : 'An investor';
     });
     if (typeof st.company.prestige !== 'number') st.company.prestige = 0;
+    // A save with no platform deal in it is a valid save. Sanitised on the same
+    // terms as the debts, and for the same reason: `weekly` reaches KP.ledger,
+    // and one NaN there is a NaN balance and an unloseable run.
+    if (!Array.isArray(st.company.deals)) st.company.deals = [];
+    st.company.deals = st.company.deals.filter(d => d && KP.platformSpec(d));
+    st.company.deals.forEach(d => {
+      ['weeks', 'weeksLeft', 'advance', 'paid', 'earned'].forEach(k => {
+        if (typeof d[k] !== 'number' || !isFinite(d[k])) d[k] = 0;
+      });
+      if (typeof d.id !== 'string') d.id = U.uid('deal');
+    });
     if (!Array.isArray(st.log)) st.log = [];
     if (!Array.isArray(st.recap)) st.recap = [];
     if (!Array.isArray(st.chart)) st.chart = [];
@@ -658,7 +788,21 @@
     if (typeof st.calendarYear !== 'number') st.calendarYear = 2025 + st.year;
     if (typeof st.scoutRefreshedWeek !== 'number') st.scoutRefreshedWeek = KP.absWeek(st);
     st.stats = Object.assign(
-      { releases: 0, wins: 0, no1: 0, stages: 0, varietyShows: 0, lives: 0, tickets: 0 }, st.stats);
+      {
+        releases: 0, wins: 0, no1: 0, stages: 0, varietyShows: 0, lives: 0, tickets: 0,
+        tourLegs: 0, scandals: 0
+      }, st.stats);
+    // A story the run was in the middle of answering. Both of these are plain
+    // records with a group id in them, and a group can disband between the week
+    // the file was written and the week it is opened — a scandal about nobody is
+    // dropped rather than carried into a modal with no group behind it.
+    if (!st.scandal || typeof st.scandal !== 'object'
+      || !st.groups.some(g => g.id === st.scandal.gid)
+      || !KP.scandalSpec(st.scandal)) st.scandal = null;
+    if (st.scandal && (typeof st.scandal.sev !== 'number' || !isFinite(st.scandal.sev))) st.scandal = null;
+    if (!st.fallout || typeof st.fallout !== 'object'
+      || typeof st.fallout.absWeek !== 'number' || !isFinite(st.fallout.absWeek)
+      || !st.groups.some(g => g.id === st.fallout.gid)) st.fallout = null;
     st.trends = st.trends || {};
     KP.concepts.forEach(c => { if (typeof st.trends[c.k] !== 'number') st.trends[c.k] = 50; });
     // The rival agencies are additive: a file written before they existed has
@@ -714,6 +858,9 @@
     // KP.faceKey() draws across the whole pool. Widen the hash before the pool
     // ever gets that big.
     st.trainees.forEach(t => {
+      // `hiatus` is the third status, and it is additive in the same sense the
+      // fields are: a file that has never heard of it simply has nobody on one.
+      if (KP.STATUS.indexOf(t.status) < 0) { t.status = 'ok'; t.statusWeeks = 0; }
       if (typeof t.face === 'string' || t.face === null) return;
       const g = st.company.gender, total = KP.faces.count[g] || 0;
       t.face = total ? g + (U.hue(t.id) % total) : null;
@@ -724,6 +871,21 @@
       if (typeof g.fans !== 'number') g.fans = 0;
       if (typeof g.stagesY !== 'number') g.stagesY = 0;
       if (typeof g.varietyY !== 'number') g.varietyY = 0;
+      // The three numbers that say what kind of fandom this is. Additive, and
+      // back-filled to the starting values rather than to anything derived: the
+      // whole modifier set is written as a deviation from exactly these, so a
+      // save from before the sprint loads into the economy it was playing in and
+      // then starts moving. A NaN here would reach album sales, merch, the gate
+      // and the hype of every future comeback at once.
+      const FD = KP.fandom;
+      if (typeof g.loyal !== 'number' || !isFinite(g.loyal)) g.loyal = FD.loyal0;
+      if (typeof g.senti !== 'number' || !isFinite(g.senti)) g.senti = FD.senti0;
+      if (typeof g.intl !== 'number' || !isFinite(g.intl)) g.intl = FD.intl0;
+      g.loyal = U.clamp(g.loyal, 0, 100);
+      g.senti = U.clamp(g.senti, 0, 100);
+      g.intl = U.clamp(g.intl, 0, FD.intlCap);
+      if (typeof g.tourLegs !== 'number' || !isFinite(g.tourLegs)) g.tourLegs = 0;
+      if (typeof g.toursY !== 'number') g.toursY = 0;
       // The group card prints g.debut.y unconditionally, and the yearbook reads it
       // to decide who is a rookie. A group without one is a crash, not a blank.
       if (!g.debut || typeof g.debut.y !== 'number') g.debut = { y: st.year, w: st.week };

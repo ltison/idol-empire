@@ -139,6 +139,7 @@
       ['out', 'Staff', L.out.staff, 'coaches · producer · marketing'],
       ['out', 'Promotion', L.out.promo, 'active campaigns'],
       ['out', 'Debt service', L.out.debt, 'principal + interest'],
+      ['out', 'Platform fees', L.out.platform, 'streaming commitments'],
       // Not billed here — E.earn already took it. Shown because a line the
       // player cannot see is a line that lies.
       // ...and the note says merch rather than "the top line" because that is
@@ -474,6 +475,9 @@
         <div class="kv">
           <div><b>${U.num(g.fans)}</b><span>Fans</span></div>
           <div><b>${Math.round(g.momentum)}</b><span>Momentum</span></div>
+          <div><b>${Math.round(KP.loyalOf(g))}</b><span>Loyalty</span></div>
+          <div><b class="${KP.sentiOf(g) < 40 ? 'neg' : ''}">${Math.round(KP.sentiOf(g))}</b><span>Sentiment</span></div>
+          <div><b>${Math.round(KP.intlOf(g) * 100)}%</b><span>Overseas</span></div>
           <div><b>${g.releases.length}</b><span>Releases</span></div>
           <div><b>${g.stagesY}</b><span>Stages this year</span></div>
           <div><b>${U.num(g.ticketsY)}</b><span>Tickets this year</span></div>
@@ -513,9 +517,9 @@
     // A live is booked against the fandom it will have on the night, and a group
     // can lose fans between the two. A show that has slipped under break-even
     // since it was paid for is the one thing on this board worth interrupting for.
-    const lives = st.bookings.filter(b => b.kind === 'live').map(b => {
+    const lives = st.bookings.filter(b => KP.isGig(b.kind)).map(b => {
       const g = st.groups.find(x => x.id === b.groupId);
-      return { b, g, pv: g ? KP.engine.livePreview(st, g, b.show, b.absWeek) : null };
+      return { b, g, pv: g ? KP.engine.livePreview(st, g, b.show, b.absWeek, b.kind) : null };
     });
     const production = lives.reduce((s, x) => s + x.b.fee, 0);
     const doomed = lives.filter(x => x.pv && x.pv.doomed).map(x =>
@@ -550,10 +554,12 @@
           const spec = KP.bookingSpec(b);
           const tone = b.kind === 'music' ? 'hot' : b.kind === 'variety' ? 'cool' : '';
           const late = abs - now <= B.lateWeeks;
-          return `<span class="chip ${tone}">${U.esc(spec.name)}</span>
+          const leg = b.tourId ? ' · leg ' + b.leg + '/' + b.legs : '';
+          return `<span class="chip ${tone}">${U.esc(spec.name)}${U.esc(leg)}</span>
             <button class="btn btn-sm btn-cut" data-act="book-cancel" data-id="${b.id}"
-              title="${late ? 'Too late for a refund — pulling out now costs reputation'
-              : 'Cancel · ' + U.money(Math.round(b.fee * B.cancelBack)) + ' recovered'}">✕</button>`;
+              title="${b.tourId ? 'Cancels the whole tour — legs inside ' + B.lateWeeks + ' weeks return nothing'
+              : late ? 'Too late for a refund — pulling out now costs reputation'
+                : 'Cancel · ' + U.money(Math.round(b.fee * B.cancelBack)) + ' recovered'}">✕</button>`;
         }).join('');
         return `<div class="sw-row" style="--accent:${g.color}">
           <span class="sw-g" title="${U.esc(g.name)}">${U.esc(g.name)}</span>
@@ -803,6 +809,184 @@
     return head + rookieRace(st) + `<div class="grid g-2">${cards}</div>`;
   }
 
+  /* ------------------------------ the fandom ------------------------------
+     One screen for the three numbers that say what kind of fandom a group has,
+     what each of them is currently worth as a multiplier, who is standing
+     outside the dormitory, and the two contracts that move the split. Every
+     number here is read from the same derivations the engine spends — nothing
+     on this screen is computed for display. */
+
+  function meter(label, kr, value, pct, tone) {
+    return `<div class="trend">
+      <span class="nm">${U.esc(label)}<em>${U.esc(kr)}</em></span>
+      <i>${U.esc(value)}</i>
+      <div class="bar ${tone || 'calm'}"><u style="width:${U.clamp(pct, 0, 100).toFixed(1)}%"></u></div>
+    </div>`;
+  }
+
+  /* A multiplier reads as a multiplier: 1.00 is the group you debuted. */
+  function mul(x) { return '×' + x.toFixed(2); }
+  function mulTone(x) { return x > 1.02 ? 'pos' : x < .98 ? 'neg' : ''; }
+
+  function fandomCard(st, g) {
+    const F = KP.fandom;
+    const m = KP.fanMods(g);
+    const split = KP.fandomSplit(g);
+    const press = KP.pressure(st, g);
+    const dorm = st.company.facilities.dorm;
+    const target = KP.engine.intlTarget(st, g);
+    const quiet = g.lastReleaseAbs == null ? null : KP.absWeek(st) - g.lastReleaseAbs;
+
+    return `<article class="card group-card" style="--accent:${g.color}">
+      <div class="group-head">
+        <div>
+          <div class="group-name">${U.esc(g.name)}</div>
+          <div class="group-kr">${U.num(g.fans)} fans · ${U.esc(g.fandom || '')}</div>
+        </div>
+        <span class="spacer"></span>
+        ${g.active ? `<span class="chip hot">Promoting</span>` : `<span class="chip">Resting</span>`}
+      </div>
+
+      ${meter('Loyalty', '충성도', Math.round(KP.loyalOf(g)) + ' / 100', KP.loyalOf(g), 'life')}
+      ${meter('Public sentiment', '여론', Math.round(KP.sentiOf(g)) + ' / 100', KP.sentiOf(g))}
+      ${meter('International', '해외 비중', Math.round(KP.intlOf(g) * 100) + '% · heading for '
+        + Math.round(target * 100) + '%', KP.intlOf(g) * 100, 'warm')}
+
+      <div class="kv" style="margin-top:14px">
+        <div><b>${U.num(split.home)}</b><span>At home</span></div>
+        <div><b>${U.num(split.intl)}</b><span>Overseas</span></div>
+        <div><b class="${mulTone(m.sales)}">${mul(m.sales)}</b><span>Album sales</span></div>
+        <div><b class="${mulTone(m.merch)}">${mul(m.merch)}</b><span>Merch</span></div>
+        <div><b class="${mulTone(m.stream)}">${mul(m.stream)}</b><span>Streaming</span></div>
+        <div><b class="${mulTone(m.acq)}">${mul(m.acq)}</b><span>New fans</span></div>
+        <div><b class="${mulTone(m.pull)}">${mul(m.pull)}</b><span>Ticket demand</span></div>
+        <div><b class="${mulTone(m.hype)}">${mul(m.hype)}</b><span>Comeback hype</span></div>
+      </div>
+
+      <div class="riv-g">
+        <div class="riv-head">
+          <span class="riv-nm">Outside the dorm</span>
+          <span class="tiny muted">sasaeng &amp; antifan pressure</span>
+          <span class="spacer" style="margin-left:auto"></span>
+          <span class="chip ${press > F.pressFloor ? 'hot' : ''}">${Math.round(press)}${
+            press > F.pressFloor ? '' : ' · quiet'}</span>
+        </div>
+        <div class="bar ${press > F.pressFloor ? 'warm' : 'calm'}"><u style="width:${press.toFixed(0)}%"></u></div>
+        <p class="tiny muted" style="margin:8px 0 0">${press > F.pressFloor
+        ? 'Fame buys an audience that does not go home, and low sentiment multiplies it. Every week above '
+          + F.pressFloor + ' costs morale, and somebody has a bad week roughly every '
+          + Math.max(1, Math.round(KP.memberOf(st, g).length ? F.pressRoll / press / KP.memberOf(st, g).length : 99))
+          + ' weeks. ' + (dorm > 1
+            ? 'The dormitory at Lv' + dorm + ' is already holding ' + ((dorm - 1) * F.pressDorm)
+              + ' points of it down; another level takes off ' + F.pressDorm + ' more.'
+            : 'A bigger dormitory is the only thing that buys it back — Lv2 would take '
+              + F.pressDorm + ' points off this number.')
+        : 'Nobody is camping outside. The dormitory at Lv' + dorm + ' is comfortably ahead of the attention.'}</p>
+      </div>
+
+      <p class="tiny muted" style="margin:12px 0 0">${quiet != null && quiet > F.quietFrom && !g.active
+        ? '⚠ ' + quiet + ' weeks since the last release — a fandom with nothing to talk about loses '
+          + F.quietLoyal.toFixed(2) + ' loyalty a week on top of the drift.'
+        : 'Loyalty is built by going out — a fan meeting, a variety slot, a stage — and spent by growing: '
+          + 'every new fan arrives at ' + F.newFanLoyal + ' and is averaged in.'}</p>
+    </article>`;
+  }
+
+  /* The platform deals: an advance now, a bill every week, and a multiplier on
+     streaming revenue only. Signed straight from the row — there is nothing to
+     configure, so there is nothing to put in a modal. */
+  function dealsCard(st) {
+    const D = KP.deals;
+    const open = st.company.deals || [];
+    const mulNow = KP.streamMul(st);
+
+    const rows = open.length ? `<div class="ledger">${open.map(d => {
+      const sp = KP.platformSpec(d);
+      const won = d.earned >= d.paid;
+      return `<div class="led-row">
+        <span class="led-label">${U.esc(sp.name)}<i class="${won ? 'pos' : ''}">${d.weeksLeft}w left ·
+          ${U.money(sp.weekly)} a week · ${U.money(d.earned)} of streaming earned against
+          ${U.money(d.paid)} paid</i></span>
+        <b class="${won ? 'pos' : 'neg'}">${mul(sp.streamMul)}</b>
+      </div>`;
+    }).join('')}</div>` : `<p class="tiny muted" style="margin:6px 0 0">No platform behind you. Streaming
+      revenue is whatever the chart gives you.</p>`;
+
+    const offers = KP.platforms.map(p => {
+      const block = KP.engine.dealBlock(st, p.k);
+      return `<button class="opt ${block ? 'locked' : ''}" ${block ? 'disabled' : ''}
+          data-act="deal-take" data-key="${p.k}">
+        <div><b>${U.esc(p.name)}
+          <span style="font-family:var(--kr);font-weight:400;color:var(--lilac)">${U.esc(p.kr)}</span></b>
+          <small>${U.esc(p.desc)}${block ? ' · ' + U.esc(block) : ''}</small></div>
+        <span class="q">${mul(p.streamMul)} streams · ${Math.round(p.intlPull * 100)}% overseas · ${p.weeks}w</span>
+        <span class="c">+${U.money(p.advance)} / −${U.money(p.weekly)}w</span>
+      </button>`;
+    }).join('');
+
+    return `<div class="card">
+      <div class="sec-head"><h2>Platform deals</h2><span class="kr">플랫폼</span>
+        <p>${open.length} of ${D.maxDeals} signed · streaming ${mul(mulNow)}</p></div>
+      ${rows}
+      <div class="opt-list" style="margin-top:14px">${offers}</div>
+      <p class="tiny muted" style="margin:12px 0 0">An advance the week you sign, a commitment fee in the weekly
+        books every week after it, and a multiplier that lands on streaming revenue and nothing else — so a deal
+        signed with nothing out is a bill and no more. The term runs to the end; there is no buyout. What it also
+        does is drag the fandom overseas, which is the half a tour cannot do on its own.</p>
+    </div>`;
+  }
+
+  function scandalBanner(st) {
+    const s = st.scandal;
+    if (!s) return '';
+    const g = st.groups.find(x => x.id === s.gid);
+    const spec = KP.scandalSpec(s);
+    if (!g || !spec) return '';
+    return `<div class="card" style="margin-bottom:16px;border-color:var(--hot)">
+      <div class="sec-head"><h2>${U.esc(spec.ic)} ${U.esc(spec.name)}</h2><span class="kr">${U.esc(spec.kr)}</span>
+        <p>${U.esc(s.who)} · ${U.esc(g.name)} · severity ${s.sev}</p>
+        <span class="spacer"></span>
+        <button class="btn btn-primary" data-act="open-scandal">Answer it</button></div>
+      <p class="tiny neg" style="margin:-6px 0 0">${U.esc(spec.desc)}. An answer is owed this week — if the week
+        turns without one, the agency has answered with silence.</p>
+    </div>`;
+  }
+
+  function fandomTab(st) {
+    const head = `<div class="sec-head"><h2>The fandom</h2><span class="kr">팬덤</span>
+      <p>${U.num(KP.totalFans(st))} people, and what kind of people they are</p></div>`;
+
+    // The deals card stays even with nobody on the roster: a platform contract is
+    // signed by the agency rather than by a group, and the terms are worth
+    // reading long before the fandom gate opens.
+    if (!st.groups.length) {
+      return head + scandalBanner(st) +
+        `<div class="empty"><b>No fandom yet</b>Debut a group and it starts the week it plays its first stage.</div>` +
+        `<div style="margin-top:16px">${dealsCard(st)}</div>`;
+    }
+
+    const totalIntl = st.groups.reduce((s, g) => s + KP.fandomSplit(g).intl, 0);
+    const totalFans = KP.totalFans(st);
+    const summary = `<div class="card" style="margin-bottom:16px">
+      <div class="kv" style="margin:0">
+        <div><b>${U.num(totalFans)}</b><span>Total fans</span></div>
+        <div><b>${U.num(totalIntl)}</b><span>Overseas</span></div>
+        <div><b>${totalFans ? Math.round(totalIntl / totalFans * 100) : 0}%</b><span>International share</span></div>
+        <div><b>${U.money(KP.ledger(st).in.merch)}</b><span>Merch per week</span></div>
+        <div><b>${st.stats.tourLegs}</b><span>Tour legs played</span></div>
+        <div><b class="${st.stats.scandals ? 'neg' : ''}">${st.stats.scandals}</b><span>Scandals</span></div>
+      </div>
+      <p class="tiny muted" style="margin:12px 0 0">Loyalty is who buys, sentiment is what everybody else thinks,
+        and the international share decides which of the two halves of the business you are in: home fans buy
+        albums and vote, overseas fans stream, pay a premium for goods and are the only people a world tour can
+        sell a seat to.</p>
+    </div>`;
+
+    return head + scandalBanner(st) + summary +
+      `<div class="grid g-2">${st.groups.map(g => fandomCard(st, g)).join('')}</div>` +
+      `<div style="margin-top:16px">${dealsCard(st)}</div>`;
+  }
+
   function logTab(st) {
     const head = `<div class="sec-head"><h2>Feed</h2><span class="kr">소식</span><p>Everything that happened</p></div>`;
     if (!st.log.length) return head + `<div class="empty"><b>Nothing yet</b></div>`;
@@ -845,6 +1029,9 @@
     // comebacks are inside the window you can still move a release around.
     $('#badge-rivals').textContent =
       KP.rivalPlansIn(st, KP.absWeek(st) + 1, KP.absWeek(st) + KP.rivals.announceLead).length || '';
+    // A story waiting for an answer is the one badge that is a deadline rather
+    // than a count, so it says so with a mark instead of a number.
+    $('#badge-fandom').textContent = st.scandal ? '!' : '';
 
     document.querySelectorAll('.rail-btn').forEach(b =>
       b.classList.toggle('is-on', b.dataset.tab === ui.tab));
@@ -852,7 +1039,7 @@
     // Same order as the rail in index.html and the tabs array in main.js.
     const views = {
       dash: officeTab, trainees: traineesTab, scout: scoutTab, groups: groupsTab,
-      sched: schedTab, chart: chartTab, rivals: rivalsTab, log: logTab
+      sched: schedTab, chart: chartTab, rivals: rivalsTab, fandom: fandomTab, log: logTab
     };
     $('#stage').innerHTML = (views[ui.tab] || officeTab)(st);
     $('#stage').scrollTop = 0;
@@ -1064,6 +1251,10 @@
         <div><b>${U.money(pv.cost)}</b><span>Production</span></div>
         <div><b>${U.money(totalPromo)}</b><span>Promo over ${promo.weeks}w</span></div>
       </div>
+      <p class="tiny muted" style="margin:8px 2px 0">First-week albums ≈ <b>${U.num(pv.units)}</b> copies at
+        loyalty ${Math.round(KP.loyalOf(g))} and ${Math.round(KP.intlOf(g) * 100)}% overseas (×${pv.mods.sales.toFixed(2)}),
+        and the public is currently worth ×${pv.mods.hype.toFixed(2)} on hype${pv.mods.hype < .99
+        ? ' — a cold room is a smaller opening than the same song deserves.' : '.'}</p>
       <p class="tiny muted" style="margin:8px 2px 0">Releasing into <b>${U.esc(pv.season.name)}</b> · ${U.esc(pv.season.kr)} —
         rival opening points ×${pv.season.field.toFixed(2)}, streaming revenue ×${pv.season.audience.toFixed(2)}.
         ${pv.season.field > 1
@@ -1114,31 +1305,33 @@
       </button>`;
     }).join('');
 
-    const isLive = bk.kind === 'live';
+    const isTour = bk.kind === 'tour';
+    const isLive = KP.isGig(bk.kind);
     const shows = KP.showsOf(bk.kind).map(s => {
       const block = KP.engine.bookBlock(st, g, bk.kind, s.k, bk.abs);
       const pv = KP.engine.bookPreview(st, g, bk.kind, s.k, bk.abs);
       const note = block ? ' · ' + block
-        : isLive ? ' · ' + U.num(pv.breakEven) + ' seats to break even'
+        : isLive ? ' · ' + U.num(pv.breakEven) + ' seats a night to break even'
           : ' · ' + pv.slots + ' slot' + (pv.slots === 1 ? '' : 's') + ' left';
       return `<button class="opt ${bk.show === s.k ? 'is-on' : ''} ${block ? 'locked' : ''}"
           ${block ? 'disabled' : ''} data-act="book-show" data-key="${s.k}">
         <div><b>${U.esc(s.name)}
           <span style="font-family:var(--kr);font-weight:400;color:var(--lilac)">${U.esc(s.kr)}</span></b>
-          <small>${U.esc(s.desc)}${isLive ? ' · ' + U.num(s.cap) + ' seats' : ''}${U.esc(note)}</small></div>
+          <small>${U.esc(s.desc)}${isLive ? ' · ' + U.num(s.cap) + ' seats' : ''}${
+        isTour ? ' × ' + s.legs + ' legs · needs ' + Math.round(s.intl * 100) + '% overseas' : ''}${U.esc(note)}</small></div>
         <span class="q">${isLive
-          ? U.num(pv.lo) + '–' + U.num(pv.hi) + ' seats'
+          ? U.num(pv.lo) + '–' + U.num(pv.hi) + ' seats' + (isTour ? '/night' : '')
           : bk.kind === 'music'
             ? '+' + s.points.toFixed(1) + ' pts'
             : 'variety ' + s.need + '+'}</span>
-        <span class="c">${U.money(isLive ? s.cost : s.fee)}</span>
+        <span class="c">${U.money(isTour ? s.cost * s.legs : isLive ? s.cost : s.fee)}</span>
       </button>`;
     }).join('');
 
     const s = bk.show ? KP.showSpec(bk.kind, bk.show) : null;
     const pv = s ? KP.engine.bookPreview(st, g, bk.kind, bk.show, bk.abs) : null;
     const block = s ? KP.engine.bookBlock(st, g, bk.kind, bk.show, bk.abs) : 'Pick a show.';
-    const upfront = s ? (isLive ? s.cost : s.fee) : 0;
+    const upfront = s ? (isLive ? pv.totalCost : s.fee) : 0;
     const afford = s ? st.company.money >= upfront : false;
 
     let est = '';
@@ -1157,21 +1350,25 @@
           ? 'an extra slot' : 'one slot fewer'}.</p>`;
     } else if (pv && isLive) {
       est = `<div class="est">
-        <div><b class="neg">${U.money(pv.cost)}</b><span>Paid up front</span></div>
+        <div><b class="neg">${U.money(pv.totalCost)}</b><span>Paid up front${isTour ? ' · ' + pv.legs + ' legs' : ''}</span></div>
         <div><b>${U.num(pv.breakEven)}</b><span>Seats to break even</span></div>
-        <div><b>${U.num(pv.lo)}–${U.num(pv.hi)}</b><span>Likely attendance</span></div>
+        <div><b>${U.num(pv.lo)}–${U.num(pv.hi)}</b><span>Attendance${isTour ? ' a night' : ''}</span></div>
         <div><b>${Math.round(pv.fillLo * 100)}–${Math.round(pv.fillHi * 100)}%</b><span>Fill</span></div>
-        <div><b class="${pv.doomed ? 'neg' : pv.safe ? 'pos' : ''}">${U.money(pv.grossLo)}–${U.money(pv.grossHi)}</b><span>Gate</span></div>
-        <div><b>${s.stamina}</b><span>Stamina each</span></div>
+        <div><b class="${pv.doomed ? 'neg' : pv.safe ? 'pos' : ''}">${U.money(pv.grossLo * pv.legs)}–${U.money(pv.grossHi * pv.legs)}</b><span>Gate${isTour ? ', all legs' : ''}</span></div>
+        <div><b>${s.stamina}${isTour ? ' ×' + pv.legs : ''}</b><span>Stamina each</span></div>
       </div>
       <p class="tiny ${pv.doomed ? 'neg' : pv.safe ? 'pos' : 'muted'}" style="margin:8px 2px 0">
         ${pv.doomed
-          ? 'This venue cannot break even on your fandom. Do not book it.'
+          ? 'This ' + (isTour ? 'tour' : 'venue') + ' cannot break even on your fandom. Do not book it.'
           : pv.safe
             ? 'Even a soft week clears the production cost.'
             : 'A soft week loses money here. Momentum, an active comeback and the season all move the gate.'}
-        Modifiers: comeback ×${pv.mods.promo.toFixed(2)} · momentum ×${pv.mods.heat.toFixed(2)} ·
-        standing ×${pv.mods.stand.toFixed(2)} · ${U.esc(pv.season.name)} ×${pv.mods.audience.toFixed(2)}${pv.mods.stale < 1
+        ${isTour
+          ? 'A tour sells to the ' + U.num(pv.crowd) + ' fans you have overseas and to nobody else, over '
+            + pv.legs + ' consecutive weeks the group cannot be anywhere else. '
+          : ''}Modifiers: comeback ×${pv.mods.promo.toFixed(2)} · momentum ×${pv.mods.heat.toFixed(2)} ·
+        standing ×${pv.mods.stand.toFixed(2)} · loyalty ×${pv.mods.loyal.toFixed(2)} ·
+        ${U.esc(pv.season.name)} ×${pv.mods.audience.toFixed(2)}${pv.mods.stale < 1
         ? ' · no recent release ×' + pv.mods.stale.toFixed(2) : ''}</p>`;
     } else if (pv) {
       est = `<div class="est">
@@ -1205,8 +1402,9 @@
       </div>
 
       <div class="wiz-step">
-        <span class="eyebrow">2 — ${isLive ? 'The venue · production is paid the moment you confirm'
-        : 'The booking · the fee is paid the moment you confirm'}</span>
+        <span class="eyebrow">2 — ${isTour ? 'The routing · every leg is paid the moment you confirm'
+        : isLive ? 'The venue · production is paid the moment you confirm'
+          : 'The booking · the fee is paid the moment you confirm'}</span>
         <div class="opt-list">${shows}</div>
       </div>
 
@@ -1214,8 +1412,10 @@
 
       <div class="modal-foot">
         <span class="tiny ${!s ? 'muted' : block ? 'neg' : afford ? 'muted' : 'neg'}">
-          ${!s ? (isLive ? 'Pick a venue.' : 'Pick a show.') : block ? U.esc(block) : afford
-        ? 'Cancelling more than ' + KP.bookings.lateWeeks + ' weeks out returns half of what you paid. Inside that, nothing.'
+          ${!s ? (isTour ? 'Pick a routing.' : isLive ? 'Pick a venue.' : 'Pick a show.') : block ? U.esc(block) : afford
+        ? (isTour ? 'Cancelling pulls the whole tour — half back per leg, nothing inside '
+          + KP.bookings.lateWeeks + ' weeks.'
+          : 'Cancelling more than ' + KP.bookings.lateWeeks + ' weeks out returns half of what you paid. Inside that, nothing.')
         : isLive ? 'Not enough cash for the production budget.' : 'Not enough cash for the appearance fee.'}
         </span>
         <span class="spacer"></span>
@@ -1375,6 +1575,63 @@
           Prestige is permanent, and caps at ${KP.awards.prestigeCap}.</span>
         <span class="spacer"></span>
         <button class="btn btn-primary" data-act="modal-close">Take the stage</button>
+      </div>`);
+  };
+
+  /* ------------------------------ the scandal ------------------------------
+     The only modal in the game that is a question rather than a form. Three
+     answers, priced by E.scandalOptions so the numbers here are the numbers the
+     engine spends, and a fourth the player gets for free by doing nothing — said
+     out loud at the bottom, because a deadline nobody told you about is not a
+     decision.
+
+     The PR read is the marketing lead's, it was rolled once when the story
+     broke, and it is wrong often enough to be worth thinking about. */
+
+  ui.openScandal = function () {
+    const st = KP.state;
+    const s = st.scandal;
+    if (!s) return;
+    const g = st.groups.find(x => x.id === s.gid);
+    const spec = KP.scandalSpec(s);
+    if (!g || !spec) return;
+    const S = KP.scandal;
+    const opts = KP.engine.scandalOptions(st);
+
+    const rows = opts.map(o => `<button class="opt ${o.blocked ? 'locked' : ''}"
+        ${o.blocked ? 'disabled' : ''} data-act="scandal-pick" data-key="${o.k}">
+      <div><b>${U.esc(o.ic)} ${U.esc(o.label)}</b>
+        <small>${U.esc(o.desc)}${o.blocked ? ' · ' + U.esc(o.blocked) : ''}</small></div>
+      <span class="q">${o.sentiTrue} if true / ${o.sentiFalse} if not</span>
+      <span class="c">${o.cost ? U.money(o.cost) : 'free'}</span>
+    </button>`).join('');
+
+    const sil = S.out.silence;
+    ui.modal(`
+      <div class="modal-head">
+        <div><div class="kr">${U.esc(spec.kr)}</div><h3>${U.esc(spec.ic)} ${U.esc(spec.name)}</h3></div>
+        <button class="modal-close" data-act="modal-close">✕</button>
+      </div>
+      <p class="muted" style="margin:0 0 6px">${U.esc(spec.desc)} — ${U.esc(s.who)} of
+        <b>${U.esc(g.name)}</b>, and every desk in the building is waiting on you.</p>
+      <div class="est">
+        <div><b class="neg">${s.sev}</b><span>Severity</span></div>
+        <div><b>${Math.round(KP.sentiOf(g))}</b><span>Sentiment now</span></div>
+        <div><b>${Math.round(KP.loyalOf(g))}</b><span>Loyalty now</span></div>
+        <div><b>${U.num(Math.round(g.fans * s.sev / S.fansDiv))}</b><span>Fans it will cost</span></div>
+      </div>
+      <p class="tiny ${s.read ? 'neg' : 'muted'}" style="margin:10px 2px 0">
+        🕵️ Your marketing lead's read: <b>the story is ${s.read ? 'probably true' : 'probably nonsense'}</b>
+        — and they are right about ${Math.round(s.conf * 100)}% of the time at Lv${st.company.staff.marketing}.
+        A denial that turns out to have been a lie comes back in a few weeks, worse.</p>
+      <div class="opt-list" style="margin-top:14px">${rows}</div>
+      <div class="modal-foot">
+        <span class="tiny neg">Say nothing and the week answers for you:
+          ${Math.round(sil.senti[0] * s.sev)} to ${Math.round(sil.senti[1] * s.sev)} sentiment,
+          ${sil.loyal} loyalty, ${sil.rep} reputation. The sentiment column above is the same trade —
+          you are told what each answer is worth, never which half applies.</span>
+        <span class="spacer"></span>
+        <button class="btn" data-act="modal-close">Decide later</button>
       </div>`);
   };
 

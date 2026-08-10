@@ -63,6 +63,38 @@
   }
   E.fanGain = fanGain;
 
+  /* The one place fans are ADDED, as opposed to counted. fanGain stays pure
+     because the previews quote it; this is the mutating half, and it does the
+     second thing a new fan does: dilute.
+
+     A newcomer arrives at KP.fandom.newFanLoyal and is averaged into the loyalty
+     of everybody already holding a lightstick, which is what stops a viral week
+     from being free. A fancam worth 14% of the fandom moves loyalty by about
+     three and a half points; a stage worth 2% barely registers. Growth is real
+     and it is shallow, and going out — a fan meeting, a variety slot — is what
+     turns it back into a fandom that buys things. */
+  function creditFans(g, n) {
+    if (!(n > 0)) return 0;
+    const F = KP.fandom;
+    const before = Math.max(0, g.fans);
+    g.loyal = U.clamp((KP.loyalOf(g) * before + F.newFanLoyal * n) / (before + n), 0, 100);
+    g.fans += n;
+    return n;
+  }
+
+  const gainFans = (g, raw) => creditFans(g, fanGain(g, raw));
+  E.gainFans = gainFans;
+  // Seat sales are already bounded by the venue, so they skip the damper and go
+  // straight in — but they are still new fans, and new fans still dilute.
+  E.creditFans = creditFans;
+
+  /* Loyalty and sentiment move in a lot of places and are clamped in exactly
+     one, so nothing can walk a group off either end of its own bar. */
+  function bumpLoyal(g, d) { g.loyal = U.clamp(KP.loyalOf(g) + d, 0, 100); }
+  function bumpSenti(g, d) { g.senti = U.clamp(KP.sentiOf(g) + d, 0, 100); }
+  E.bumpLoyal = bumpLoyal;
+  E.bumpSenti = bumpSenti;
+
   /* The single choke point for income. An investor's revenue share comes out
      here, at the moment money is earned, on every tagged credit — which is why
      KP.ledger must NOT bill it again in step 5. `tag` is what decides whether a
@@ -474,11 +506,20 @@
   /* ============================== training ================================= */
 
   function trainWeek(st, t) {
-    if (t.status === 'injured') {
+    // Two ways to be off the schedule, and they are not the same week. An injury
+    // is something that happened to somebody; a hiatus is a decision the agency
+    // made about a story, and the point of it is that the person actually rests.
+    if (t.status === 'injured' || t.status === 'hiatus') {
+      const out = t.status;
       t.statusWeeks--;
-      t.stamina = U.clamp(t.stamina + 12, 0, 100);
-      t.morale = U.clamp(t.morale - 1.5, 0, 100);
-      if (t.statusWeeks <= 0) { t.status = 'ok'; KP.log(t.name + ' is cleared to train again.', 'good'); }
+      t.stamina = U.clamp(t.stamina + (out === 'hiatus' ? 20 : 12), 0, 100);
+      t.morale = U.clamp(t.morale + (out === 'hiatus' ? 4 : -1.5), 0, 100);
+      if (t.statusWeeks <= 0) {
+        t.status = 'ok';
+        KP.log(out === 'hiatus'
+          ? t.name + ' is back from hiatus.'
+          : t.name + ' is cleared to train again.', 'good');
+      }
       return;
     }
 
@@ -561,8 +602,13 @@
     let buzz = 1;
     members.forEach(m => { buzz *= traitMul(m, 'buzz'); });   // Variety Star finally earns its slot
 
+    // What the public currently thinks of them, before anybody has heard the
+    // song. A group coming off a scandal releases into a colder room, and the
+    // planner says so rather than letting the release discover it.
+    const mods = KP.fanMods(g);
+
     const hype = U.clamp((visualPull * .42 + fanPull + repPull + promo.q + (mkt - 1) * 2.2 + g.momentum * .18)
-      * (.85 + trend / 320) * fresh * fatigue * buzz, 0, 100);
+      * (.85 + trend / 320) * fresh * fatigue * buzz * mods.hype, 0, 100);
 
     // First-ever release: nerves show on stage. Applied here, not at release time,
     // so the preview cannot promise a number the release then quietly undercuts.
@@ -572,9 +618,12 @@
     const points = U.clamp((quality * .58 + hype * .42) * debutMul, 3, 99);
     // The season is carried out with the preview so the planner never has to go
     // looking for it: what the release is walking into is part of the estimate.
+    // So are the fandom modifiers, for the same reason — the first-week album
+    // number quoted below is the one E.releaseComeback will bank.
+    const units = Math.round((g.fans * (.10 + hype / 700) + hype * 150) * mods.sales);
     return {
       quality, hype, points, cost: E.planCost(sel), promo, trend, fatigue, gap, debutMul,
-      season: KP.seasonOfAbs(abs)
+      mods, units, season: KP.seasonOfAbs(abs)
     };
   };
 
@@ -630,8 +679,10 @@
     g.lastReleaseAbs = KP.absWeek(st);
     st.stats.releases++;
 
-    // Physical sales land in release week — the fandom pre-ordered weeks ago.
-    const units = Math.round(g.fans * (.10 + rel.hype / 700) + rel.hype * 150 * U.rnd(.8, 1.25));
+    // Physical sales land in release week — the fandom pre-ordered weeks ago, and
+    // a loyal domestic fandom pre-ordered four copies each. The preview's own
+    // `units` carries the modifiers so the planner's number is this number.
+    const units = Math.round(pv.units * U.rnd(.88, 1.14));
     const rev = units * KP.income.albumUnit;
     rel.sales = units;
     rel.revenue += rev;              // the discography records gross, always
@@ -662,16 +713,21 @@
     // audience rides on top of streaming only: the field decides where a song
     // ranks, the audience decides what that rank is worth. A lull pays 86% of an
     // award-season week for the identical chart position.
-    const streamRev = Math.pow(rel.points, 1.6) * KP.income.streamPerPoint * KP.seasonNow(st).audience;
+    // An international fandom streams; a platform deal is bought to multiply
+    // exactly this line and nothing else, which is why a deal signed with nothing
+    // out is a weekly bill on its own.
+    const mods = KP.fanMods(g);
+    const streamRev = Math.pow(rel.points, 1.6) * KP.income.streamPerPoint * KP.seasonNow(st).audience
+      * mods.stream * KP.streamMul(st);
     E.earn(st, streamRev, 'stream');
+    creditDeals(st, streamRev);
     rel.revenue += streamRev;
     E.ybAct(st, g).revenue += streamRev;
 
     let fanMul = 1;
     KP.memberOf(st, g).forEach(m => { fanMul *= traitMul(m, 'fans'); });
-    const gained = fanGain(g,
-      Math.pow(rel.points, 1.5) * 70 * (1 + st.company.rep / 400) * fanMul * U.rnd(.85, 1.15));
-    g.fans += gained;
+    const gained = gainFans(g,
+      Math.pow(rel.points, 1.5) * 70 * (1 + st.company.rep / 400) * fanMul * mods.acq * U.rnd(.85, 1.15));
     rel.fansGained += gained;
     E.ybAct(st, g).fans += gained;
 
@@ -705,6 +761,10 @@
       });
       if (rel.peak === 1) st.stats.no1++;
       g.momentum = U.clamp(g.momentum + (rel.peak <= 3 ? 18 : rel.peak <= 10 ? 8 : -6), 0, 100);
+      // A run the fandom is proud of is a fandom that stays. Nothing here for a
+      // quiet run: the dilution the promotion weeks already paid is the cost of
+      // having grown at all.
+      if (rel.peak <= 3) bumpLoyal(g, KP.fandom.loyalHit);
       const verdict = rel.peak === 1 ? 'a #1 hit' : rel.peak <= 10 ? 'a top-10 run' : 'a quiet run';
       KP.log('Promotions for “' + rel.title + '” wrapped — ' + verdict +
         ' (peak #' + rel.peak + ', ' + U.num(rel.fansGained) + ' new fans).', rel.peak <= 10 ? 'good' : 'info');
@@ -721,7 +781,7 @@
      ======================================================================== */
 
   function presentMembers(st, g) {
-    return KP.memberOf(st, g).filter(m => m.status !== 'injured');
+    return KP.memberOf(st, g).filter(m => m.status === 'ok');
   }
 
   /* A flat, un-modified drain — a recording day does not care how tough anyone
@@ -761,8 +821,9 @@
      which is what makes a venue a decision rather than an unlock: an active
      comeback, the group's momentum, the agency's standing, how long it has been
      since anybody heard from them, and the week of the year. Pure. */
-  E.livePreview = function (st, g, venueKey, absWeek) {
-    const v = KP.venue(venueKey);
+  E.livePreview = function (st, g, venueKey, absWeek, kind) {
+    kind = kind || 'live';
+    const v = KP.showSpec(kind, venueKey);
     if (!v) return null;
     const L = KP.live;
     const B = KP.bookings;
@@ -780,18 +841,30 @@
     const stale = gapW <= L.staleFrom ? 1
       : Math.max(L.staleFloor, 1 - (gapW - L.staleFrom) * L.staleStep);
 
-    const expected = g.fans * v.pull * promo * heat * stand * stale * season.audience;
+    // A tour sells to the international half of the fandom and a home show sells
+    // to the whole of it. That is the entire difference between the two kinds,
+    // and it is why the split is a strategy: a group with 400,000 fans and 12%
+    // abroad cannot fill a world tour that a group half its size at 40% can.
+    const split = KP.fandomSplit(g);
+    const crowd = kind === 'tour' ? split.intl : g.fans;
+    // Loyalty is who actually buys the ticket, on either side of that.
+    const loyal = KP.fanMods(g).pull;
+
+    const expected = crowd * v.pull * loyal * promo * heat * stand * stale * season.audience;
+    const legs = kind === 'tour' ? (v.legs || 1) : 1;
     const lo = Math.min(v.cap, Math.round(expected * L.rollLo));
     const hi = Math.min(v.cap, Math.round(expected * L.rollHi));
     const breakEven = Math.ceil(v.cost / v.ticket);
     return {
-      v, show: v, kind: 'live', cast, season, expected, cap: v.cap, lo, hi,
+      v, show: v, kind, cast, season, expected, cap: v.cap, lo, hi, legs, crowd,
       grossLo: lo * v.ticket, grossHi: hi * v.ticket,
-      cost: v.cost, breakEven,
+      // A tour is quoted per night AND as the whole commitment, because the whole
+      // commitment is what leaves the balance the moment it is booked.
+      cost: v.cost, totalCost: v.cost * legs, breakEven,
       fillLo: lo / v.cap, fillHi: hi / v.cap,
       safe: lo >= breakEven, doomed: hi < breakEven,
-      exposed: cast.filter(m => m.stamina - v.stamina < B.injuryFloor).length,
-      mods: { promo, heat, stand, stale, audience: season.audience }
+      exposed: cast.filter(m => m.stamina - v.stamina * legs < B.injuryFloor).length,
+      mods: { promo, heat, stand, stale, audience: season.audience, loyal }
     };
   };
 
@@ -808,12 +881,16 @@
      at three million. Quoting the raw figure would not be optimism, it would be
      a number that gets less true the better the player is doing. */
   E.bookPreview = function (st, g, kind, showKey, absWeek) {
-    if (kind === 'live') return E.livePreview(st, g, showKey, absWeek);
+    if (KP.isGig(kind)) return E.livePreview(st, g, showKey, absWeek, kind);
     const show = KP.show(kind, showKey);
     if (!show) return null;
     const B = KP.bookings;
     const cast = presentMembers(st, g);
-    const rawFans = g.fans * show.fansPct + show.fansFlat;
+    // Sentiment is inside the quote for the same reason the damper is: an
+    // appearance converts strangers at the rate the public currently likes them,
+    // and a modal that quotes the undamped, unmodified figure is a modal that
+    // gets less true the worse the week has gone.
+    const rawFans = (g.fans * show.fansPct + show.fansFlat) * KP.fanMods(g).acq;
     const fansBase = fanGain(g, rawFans);
     const pv = {
       show, kind, cast,
@@ -846,14 +923,23 @@
     const show = KP.showSpec(kind, showKey);
     if (!show) return 'No such booking.';
     const now = KP.absWeek(st);
+    const legs = kind === 'tour' ? (show.legs || 1) : 1;
     if (absWeek <= now) return 'That week has already been played.';
-    if (absWeek - now > KP.bookings.weeksAhead) {
-      return 'Nothing books more than ' + KP.bookings.weeksAhead + ' weeks out.';
+    // A tour has to fit inside the board whole — the last leg is a commitment
+    // too, and a leg booked past the horizon is a week the player cannot see.
+    if (absWeek + legs - 1 - now > KP.bookings.weeksAhead) {
+      return legs > 1
+        ? 'All ' + legs + ' legs have to fit inside the next ' + KP.bookings.weeksAhead + ' weeks.'
+        : 'Nothing books more than ' + KP.bookings.weeksAhead + ' weeks out.';
     }
     // Injuries heal — a group with nobody in it at all does not.
     if (!KP.memberOf(st, g).length) return 'There is nobody left in that group.';
     if (KP.standing(st) < show.rep) return 'Needs standing ' + show.rep + '.';
     if (g.fans < show.fans) return 'Needs ' + U.num(show.fans) + ' fans.';
+    if (kind === 'tour' && KP.intlOf(g) < show.intl) {
+      return 'Needs ' + Math.round(show.intl * 100) + '% of the fandom overseas · ' +
+        g.name + ' is at ' + Math.round(KP.intlOf(g) * 100) + '%.';
+    }
     if (KP.bookingsFor(st, g.id, absWeek).some(b => b.kind === kind)) {
       return g.name + ' already has a ' + kind + ' schedule that week.';
     }
@@ -864,19 +950,21 @@
         const left = Math.max(0, last - now);
         return 'Promotions end in ' + left + ' week' + (left === 1 ? '' : 's') + ' — there is no title track to stage by then.';
       }
-    } else if (kind === 'live') {
+    } else if (KP.isGig(kind)) {
       const L = KP.live;
-      // Two rules, and they measure different things: `gap` is how often a group
-      // can be put on a stage of its own at all, `cooldown` is how quickly the
-      // same tier can be sold to the same fandom twice.
+      // Three rules, and they measure different things: `gap` is how often a
+      // group can be put on a stage of its own at all, `cooldown` is how quickly
+      // the same tier can be sold to the same fandom twice, and the span check is
+      // the tour's own — consecutive legs are exempt from the gap among
+      // themselves because they are one commitment, not five.
       const played = Object.keys(g.liveAbs || {}).reduce((mx, k) => Math.max(mx, g.liveAbs[k]), 0);
       if (played && absWeek - played < L.gap) {
         return 'Needs ' + L.gap + ' weeks between shows.';
       }
-      if (KP.bookingsFor(st, g.id, null).some(b => b.kind === 'live'
-        && Math.abs(b.absWeek - absWeek) < L.gap)) {
-        return 'Too close to another booked show.';
-      }
+      const hi = absWeek + legs - 1;
+      const clash = KP.bookingsFor(st, g.id, null).find(b => KP.isGig(b.kind)
+        && b.absWeek + L.gap > absWeek && b.absWeek - L.gap < hi);
+      if (clash) return 'Too close to another booked show.';
       const last = (g.liveAbs || {})[showKey];
       if (last != null && absWeek - last < show.cooldown) {
         const rest = show.cooldown - (absWeek - last);
@@ -884,7 +972,7 @@
       }
     }
     // Venues have no bill to share: a hall you have paid for is yours.
-    if (kind !== 'live' && KP.slotsOpen(st, kind, showKey, absWeek) <= 0) {
+    if (!KP.isGig(kind) && KP.slotsOpen(st, kind, showKey, absWeek) <= 0) {
       const season = KP.seasonOfAbs(absWeek);
       return show.seasons && show.seasons.indexOf(season.k) < 0
         ? show.name + ' does not run in ' + season.name + '.'
@@ -903,18 +991,38 @@
     if (blocked) return { ok: false, msg: blocked };
 
     // A live show has no appearance fee — what it has is a production budget,
-    // and it is prepaid on exactly the same terms.
-    const live = kind === 'live';
+    // and it is prepaid on exactly the same terms. A tour is the same rule
+    // multiplied by its legs: the whole thing is paid the moment it is booked,
+    // because the whole thing is what has been committed to.
+    const live = KP.isGig(kind);
+    const legs = kind === 'tour' ? (show.legs || 1) : 1;
     const fee = live ? show.cost : show.fee;
-    if (st.company.money < fee) {
-      return { ok: false, msg: (live ? 'Production costs ' : 'Appearance fees cost ') + U.money(fee) + '.' };
+    const upfront = fee * legs;
+    if (st.company.money < upfront) {
+      return {
+        ok: false,
+        msg: (live ? 'Production costs ' : 'Appearance fees cost ') + U.money(upfront) +
+          (legs > 1 ? ' for all ' + legs + ' legs.' : '.')
+      };
     }
-    st.company.money -= fee;
-    const b = { id: U.uid('bk'), kind, show: showKey, groupId, absWeek: abs, fee };
-    st.bookings.push(b);
-    KP.log(g.name + (live ? ' will play ' : ' is booked on ') + show.name + ' in week ' +
-      weekLabel(st, abs) + ' · ' + U.money(fee) + '.', 'info');
-    return { ok: true, booking: b };
+    st.company.money -= upfront;
+    // One record per leg, sharing a tour id: the board shows the weeks it really
+    // eats, step 3b resolves them one at a time, and cancelling pulls the whole
+    // run rather than leaving a group stranded in the middle of a tour.
+    const tourId = legs > 1 ? U.uid('tr') : null;
+    const made = [];
+    for (let i = 0; i < legs; i++) {
+      const b = {
+        id: U.uid('bk'), kind, show: showKey, groupId, absWeek: abs + i, fee
+      };
+      if (tourId) { b.tourId = tourId; b.leg = i + 1; b.legs = legs; }
+      st.bookings.push(b);
+      made.push(b);
+    }
+    KP.log(g.name + (live ? ' will play ' : ' is booked on ') + show.name +
+      (legs > 1 ? ' — ' + legs + ' legs from ' : ' in week ') + weekLabel(st, abs) +
+      ' · ' + U.money(upfront) + '.', 'info');
+    return { ok: true, booking: made[0], bookings: made };
   };
 
   /* Y/W for an absolute week, for a log line the player can find on the board. */
@@ -930,17 +1038,29 @@
     const b = st.bookings[i];
     const B = KP.bookings;
     const spec = KP.bookingSpec(b);
+    const now = KP.absWeek(st);
+    // A tour is one commitment, so it cancels as one: pulling out of the Tokyo
+    // date does not leave a group booked into Jakarta three weeks later.
+    const pulled = b.tourId
+      ? st.bookings.filter(x => x.tourId === b.tourId)
+      : [b];
     // Inside the notice window the slot has already been printed in a schedule
-    // somebody else is holding: no refund, and the broadcaster remembers.
-    const late = b.absWeek - KP.absWeek(st) <= B.lateWeeks;
-    const back = late ? 0 : Math.round(b.fee * B.cancelBack);
-    st.bookings.splice(i, 1);
+    // somebody else is holding: no refund, and the broadcaster remembers. Judged
+    // per leg, so cancelling a tour early still recovers the legs that were far
+    // enough out.
+    let back = 0, late = false;
+    pulled.forEach(x => {
+      if (x.absWeek - now <= B.lateWeeks) late = true;
+      else back += Math.round(x.fee * B.cancelBack);
+    });
+    st.bookings = st.bookings.filter(x => pulled.indexOf(x) < 0);
     st.company.money += back;
     if (late) st.company.rep = U.clamp(st.company.rep - B.cancelRep, 0, 100);
     KP.log(late
-      ? 'Pulled out of ' + spec.name + ' at short notice — the fee is gone and so is some goodwill.'
+      ? 'Pulled out of ' + spec.name + ' at short notice — ' +
+        (back > 0 ? 'only ' + U.money(back) + ' came back, ' : 'the fee is gone ') + 'and so is some goodwill.'
       : 'Cancelled ' + spec.name + ' · ' + U.money(back) + ' of the fee recovered.', late ? 'bad' : 'info');
-    return { ok: true, back, late };
+    return { ok: true, back, late, legs: pulled.length };
   };
 
   function bookingMissed(st, g, spec) {
@@ -958,10 +1078,10 @@
     // Before the chart is built, on purpose: a stage this week is worth a rank
     // this week or it is worth nothing the player can see.
     if (g.active) g.active.points = U.clamp(g.active.points + show.points, 0, 99);
-    const gained = fanGain(g, g.fans * show.fansPct + show.fansFlat);
-    g.fans += gained;
+    const gained = gainFans(g, (g.fans * show.fansPct + show.fansFlat) * KP.fanMods(g).acq);
     st.company.rep = U.clamp(st.company.rep + show.repGain, 0, 100);
     g.momentum = U.clamp(g.momentum + show.momentum, 0, 100);
+    bumpLoyal(g, KP.fandom.loyalStage);
     cast.forEach(m => { m.morale = U.clamp(m.morale + show.morale, 0, 100); });
     payStamina(st, cast, show.stamina);
     g.stagesY++;
@@ -984,10 +1104,13 @@
 
     const talker = castTalker(cast);
     const grade = E.grade((E.varietyScore(talker) - show.need) / KP.bookings.needScale);
-    const gained = fanGain(g, (g.fans * show.fansPct + show.fansFlat) * grade.fans);
-    g.fans += gained;
+    const gained = gainFans(g, (g.fans * show.fansPct + show.fansFlat) * grade.fans * KP.fanMods(g).acq);
     st.company.rep = U.clamp(st.company.rep + show.repGain * grade.rep, 0, 100);
     g.momentum = U.clamp(g.momentum + show.momentum * grade.momentum, 0, 100);
+    // Being liked in a living room is the cheapest loyalty in the game — and a
+    // room that did not laugh takes some of it back out.
+    bumpLoyal(g, KP.fandom.loyalVariety * (grade.k === 'flat' ? -.8 : grade.k === 'viral' ? 1.5 : 1));
+    bumpSenti(g, grade.k === 'flat' ? -1 : grade.k === 'viral' ? 2.5 : 1);
     // A booking is also a lesson: the whole cast picks up variety, which is the
     // only way a group of stiff dancers ever gets to be funny.
     cast.forEach(m => {
@@ -1014,7 +1137,9 @@
      the size of, and the only one that can come in under what it cost. */
   function resolveLive(st, g, b) {
     const L = KP.live;
-    const v = KP.venue(b.show);
+    const tour = b.kind === 'tour';
+    const v = KP.showSpec(b.kind, b.show);
+    const leg = tour ? ' · leg ' + b.leg + '/' + b.legs : '';
     const cast = presentMembers(st, g);
     if (!cast.length) {
       // A pulled show refunds tickets and costs far more than a missed taping:
@@ -1028,7 +1153,7 @@
 
     // One roll, on the preview's own expectation, so the range the modal quoted
     // is the range the night can land in and nothing is recomputed here.
-    const pv = E.livePreview(st, g, b.show, b.absWeek);
+    const pv = E.livePreview(st, g, b.show, b.absWeek, b.kind);
     const sold = Math.min(v.cap, Math.max(0, Math.round(pv.expected * U.rnd(L.rollLo, L.rollHi))));
     const gross = sold * v.ticket;
     const fill = sold / v.cap;
@@ -1040,8 +1165,7 @@
       : ratio >= L.gradeOk ? 'ok' : 'undersold';
 
     E.earn(st, gross, 'live');
-    const gained = Math.round(sold * L.newFanRate[grade]);
-    g.fans += gained;
+    const gained = creditFans(g, Math.round(sold * L.newFanRate[grade]));
     g.liveAbs = g.liveAbs || {};
     g.liveAbs[v.k] = b.absWeek;
     g.livesY++;
@@ -1054,17 +1178,28 @@
 
     st.company.rep = U.clamp(st.company.rep + v.repGain * L.repMul[grade], 0, 100);
     g.momentum = U.clamp(g.momentum + L.momentum[grade], 0, 100);
+    // A room that came is a room that stays — and one that did not come was
+    // photographed. Both are worth more to the fandom than to the books.
+    bumpLoyal(g, grade === 'undersold' ? -(v.loyal || 0) : (v.loyal || 0) *
+      (grade === 'triumph' ? 1.5 : grade === 'strong' ? 1 : .5));
+    if (tour) {
+      // A tour builds an audience where it plays, and it keeps it: the legs are
+      // counted for life, which is what raises the international target for good.
+      g.tourLegs = (g.tourLegs || 0) + 1;
+      g.toursY = (g.toursY || 0) + 1;
+      st.stats.tourLegs++;
+    }
     cast.forEach(m => {
       m.morale = U.clamp(m.morale + (grade === 'undersold' ? L.undersoldMorale : v.morale), 0, 100);
     });
     payStamina(st, cast, v.stamina);
 
     const soldOut = fill >= L.soldOutAt;
-    const text = g.name + ' played ' + v.name + ' · ' + U.num(sold) + '/' + U.num(v.cap) +
+    const text = g.name + ' played ' + v.name + leg + ' · ' + U.num(sold) + '/' + U.num(v.cap) +
       ' seats · ' + U.money(gross) + (soldOut ? ' · SOLD OUT' : '');
     KP.log(text + (grade === 'undersold' ? ' — the empty seats were photographed.' : '.'),
       grade === 'undersold' ? 'bad' : soldOut ? 'big' : 'good');
-    pushRecap(st, grade === 'undersold' ? '🪑' : soldOut ? '🎇' : '🎫', text,
+    pushRecap(st, grade === 'undersold' ? '🪑' : soldOut ? '🎇' : tour ? '🌏' : '🎫', text,
       grade === 'undersold' ? 'bad' : soldOut ? 'big' : 'good');
   }
 
@@ -1081,19 +1216,310 @@
       if (!g) return;                        // disbanded; the fee is not coming back
       if (b.kind === 'music') resolveMusic(st, g, b);
       else if (b.kind === 'variety') resolveVariety(st, g, b);
-      else if (b.kind === 'live') resolveLive(st, g, b);
+      else if (KP.isGig(b.kind)) resolveLive(st, g, b);
     });
   };
 
   /* Everything that is counted per calendar year rather than per run. Called at
      the rollover, and the only place these counters are cleared. `g.liveAbs` is
      deliberately not among them: a cooldown is measured in absolute weeks and
-     does not care that the calendar turned over in the middle of it.
+     does not care that the calendar turned over in the middle of it. Neither is
+     `g.tourLegs`, which is a career total and the thing the international target
+     is built out of — a fandom abroad does not reset in January.
      E.runAwards must have already read the yearbook by the time this runs. */
   E.rollYear = function (st) {
-    st.groups.forEach(g => { g.stagesY = 0; g.varietyY = 0; g.livesY = 0; g.ticketsY = 0; });
+    st.groups.forEach(g => {
+      g.stagesY = 0; g.varietyY = 0; g.livesY = 0; g.ticketsY = 0; g.toursY = 0;
+    });
     st.yearbook = { y: st.year, acts: {}, songs: {} };
   };
+
+  /* ========================= the fandom as a system ========================
+     Step 4c, and the only place loyalty, sentiment and the international split
+     move on their own. It runs AFTER the week's fans have been counted (3b's
+     bookings, 4's promotion) and BEFORE the money keyed to the fandom is
+     credited — the merch line is inside this function for exactly that reason,
+     so a scandal costs merch the same week it happens rather than the week
+     after, and KP.ledger's projection of the same line reads the same
+     derivation.
+     ======================================================================== */
+
+  /* What the international share is being pulled toward this week. A target
+     rather than a bump, so nothing here can ratchet: stop touring and stop
+     paying a platform, and the fandom drifts home again. */
+  function intlTarget(st, g) {
+    const F = KP.fandom;
+    let t = Math.max(F.intlBase, KP.dealIntlPull(st));
+    if (g.active && g.active.sel && g.active.sel.mv === 'overseas') t += F.intlMv;
+    t += Math.min(F.intlPerLegCap, (g.tourLegs || 0) * F.intlPerLeg);
+    return U.clamp(t, 0, F.intlCap);
+  }
+
+  E.intlTarget = intlTarget;
+
+  E.fandomWeek = function (st) {
+    const F = KP.fandom;
+    const abs = KP.absWeek(st);
+    st.groups.forEach(g => {
+      // 1. loyalty settles toward its base, and a fandom nobody has released
+      //    anything for settles faster. Going out is what holds it up, and every
+      //    place that counts as going out has already bumped it this week.
+      const quiet = g.lastReleaseAbs == null ? 99 : abs - g.lastReleaseAbs;
+      bumpLoyal(g, (F.loyalBase - KP.loyalOf(g)) * F.loyalDrift
+        - (!g.active && quiet > F.quietFrom ? F.quietLoyal : 0));
+
+      // 2. sentiment recovers toward what the agency has earned. A scandal is a
+      //    hole in this number and nothing else, which is why it heals — slowly,
+      //    and faster for an agency with standing and a group with momentum.
+      const base = U.clamp(F.sentiBase + g.momentum * F.sentiMomentum
+        + KP.standing(st) * F.sentiStanding, 0, 100);
+      bumpSenti(g, (base - KP.sentiOf(g)) * F.sentiDrift);
+
+      // 3. the split follows the deals and the touring, in both directions.
+      g.intl = U.clamp(KP.intlOf(g) + (intlTarget(st, g) - KP.intlOf(g)) * F.intlDrift, 0, F.intlCap);
+
+      // 4. sasaeng and antifan pressure. Fame buys an audience outside the dorm;
+      //    the dorm level is what buys it back, which is the second job that
+      //    makes a Lv4 dormitory worth more than faster recovery.
+      const press = KP.pressure(st, g);
+      if (press > F.pressFloor) {
+        KP.memberOf(st, g).forEach(m => {
+          m.morale = U.clamp(m.morale - press / F.pressDrag, 0, 100);
+          if (U.chance(press / F.pressRoll)) {
+            const hit = U.rnd(F.pressMorale[0], F.pressMorale[1]);
+            m.morale = U.clamp(m.morale - hit, 0, 100);
+            KP.log(m.name + ' was followed home again — the dorm called security.', 'bad');
+            pushRecap(st, '👁', m.name + ' · sasaeng incident', 'bad');
+          }
+        });
+      }
+
+      // 5. and then the fandom pays. One derivation, shared with KP.ledger.
+      E.earn(st, KP.merchWeek(g), 'merch');
+    });
+  };
+
+  /* ============================== scandals =================================
+     The one mechanic that asks the player a question and waits for an answer.
+     A story is either true or it is not; that is rolled when it breaks, stored,
+     and never shown. What the player gets is a read from the marketing lead,
+     also rolled once, so a redraw cannot shop for a better opinion.
+     ======================================================================== */
+
+  E.openScandal = function (st, g, member, kindKey) {
+    const S = KP.scandal;
+    const spec = kindKey ? KP.scandals.find(x => x.k === kindKey) : U.pick(KP.scandals);
+    if (!spec || !g || !member) return null;
+    const truth = U.chance(spec.trueP);
+    const sev = Math.round(U.rnd(spec.sev[0], spec.sev[1]) * (1 + KP.pressure(st, g) / 200));
+    // The PR read: right this often, and rolled here rather than at render time.
+    const conf = U.clamp(S.read.base + st.company.staff.marketing * S.read.marketing
+      + KP.standing(st) / S.read.standing, .4, .95);
+    st.scandal = {
+      id: U.uid('sc'), k: spec.k, gid: g.id, mid: member.id, who: member.name,
+      truth, sev, conf, read: U.chance(conf) ? truth : !truth,
+      absWeek: KP.absWeek(st)
+    };
+    st.stats.scandals++;
+    KP.log('⚠ ' + spec.name + ': a story about ' + member.name + ' (' + g.name +
+      ') is running. The office needs an answer this week.', 'bad');
+    pushRecap(st, spec.ic, spec.name + ' · ' + member.name, 'bad');
+    return st.scandal;
+  };
+
+  /* What each response costs and is worth, with no roll in it — the modal quotes
+     this and E.scandalRespond spends exactly it. The sentiment figure is a range
+     only because the player does not know which half of the pair applies. */
+  E.scandalOptions = function (st) {
+    const s = st.scandal;
+    if (!s) return [];
+    const S = KP.scandal;
+    return Object.keys(S.out).filter(k => k !== 'silence').map(k => {
+      const o = S.out[k];
+      const cost = k === 'statement' ? Math.round(S.statementCost * s.sev / 10) : 0;
+      return {
+        k, label: o.label, ic: o.ic, desc: o.desc, cost,
+        sentiTrue: Math.round(o.senti[0] * s.sev),
+        sentiFalse: Math.round(o.senti[1] * s.sev),
+        loyal: o.loyal, rep: o.rep,
+        blocked: cost > st.company.money ? 'Costs ' + U.money(cost) + '.' : null
+      };
+    });
+  };
+
+  /* One resolution path for all four answers, including the one the player never
+     picks: `silence` is what E.nextWeek applies to a story that was still open
+     when the week turned. */
+  E.scandalRespond = function (st, choice) {
+    const s = st.scandal;
+    if (!s) return { ok: false, msg: 'Nothing to answer.' };
+    const S = KP.scandal;
+    const o = S.out[choice];
+    if (!o) return { ok: false, msg: 'No such response.' };
+    const g = st.groups.find(x => x.id === s.gid);
+    if (!g) { st.scandal = null; return { ok: false, msg: 'That group is gone.' }; }
+    // Only a priced answer can be refused for money. An agency in the red can
+    // still deny a story, still take somebody off the schedule, and above all
+    // still be answered FOR by step 0 — `cost > money` alone is true at cost
+    // zero on a negative balance, which left a broke agency permanently unable
+    // to resolve a scandal and the silence outcome unable to fire at all.
+    const cost = choice === 'statement' ? Math.round(S.statementCost * s.sev / 10) : 0;
+    if (cost > 0 && cost > st.company.money) {
+      return { ok: false, msg: 'A statement costs ' + U.money(cost) + '.' };
+    }
+
+    st.company.money -= cost;
+    const spec = KP.scandalSpec(s) || { name: 'The story', ic: '📰' };
+    const swing = o.senti[s.truth ? 0 : 1] * s.sev;
+    bumpSenti(g, swing);
+    bumpLoyal(g, o.loyal);
+    st.company.rep = U.clamp(st.company.rep + o.rep, 0, 100);
+    g.momentum = U.clamp(g.momentum + S.momentum, 0, 100);
+    // The fandom that leaves is the fandom that was never very loyal, so the
+    // loss is taken off the size and the average survives it.
+    const lost = Math.round(g.fans * (s.sev / S.fansDiv));
+    g.fans = Math.max(0, g.fans - lost);
+    const m = st.trainees.find(x => x.id === s.mid);
+    if (m) m.morale = U.clamp(m.morale - U.rnd(S.moraleHit[0], S.moraleHit[1]), 0, 100);
+
+    // Hiatus is the answer that costs the schedule rather than the balance: the
+    // member is off every stage until they are back, which is the same shape an
+    // injury has and reads completely differently in the feed.
+    let weeks = 0;
+    if (choice === 'hiatus' && m) {
+      weeks = U.irnd(S.hiatusWeeks[0], S.hiatusWeeks[1]);
+      m.status = 'hiatus';
+      m.statusWeeks = weeks;
+    }
+    // A denial that was a lie does not cost more today. It costs more later,
+    // which is the whole reason the option is free and tempting.
+    if (choice === 'deny' && s.truth) {
+      st.fallout = {
+        gid: g.id, k: s.k, sev: s.sev, who: s.who,
+        absWeek: KP.absWeek(st) + U.irnd(S.backfireIn[0], S.backfireIn[1])
+      };
+    }
+
+    st.scandal = null;
+    const line = choice === 'silence'
+      ? g.name + ' said nothing about the ' + spec.name.toLowerCase() + '. The story ran all week.'
+      : o.label + ' — ' + spec.name.toLowerCase() + ', ' + g.name + '.';
+    KP.log(line + ' Sentiment ' + Math.round(swing) + ', ' + U.num(lost) + ' fans gone' +
+      (weeks ? ', ' + s.who + ' off the schedule for ' + weeks + ' weeks' : '') + '.',
+      swing < -10 ? 'bad' : 'info');
+    pushRecap(st, o.ic, o.label + ' · ' + spec.name, swing < -10 ? 'bad' : '');
+    return { ok: true, swing, lost, weeks, cost };
+  };
+
+  /* The bill for a denial that was a lie. Resolved inside the tick rather than
+     on the night it was chosen, so the player watches it arrive. */
+  function resolveFallout(st) {
+    const f = st.fallout;
+    if (!f || KP.absWeek(st) < f.absWeek) return;
+    st.fallout = null;
+    const g = st.groups.find(x => x.id === f.gid);
+    if (!g) return;
+    const B = KP.scandal.backfire;
+    bumpSenti(g, B.senti * f.sev);
+    bumpLoyal(g, B.loyal);
+    st.company.rep = U.clamp(st.company.rep + B.rep, 0, 100);
+    const lost = Math.round(g.fans * B.fansPct);
+    g.fans = Math.max(0, g.fans - lost);
+    KP.log('The denial has fallen apart — ' + f.who + '\'s story was true after all. ' +
+      U.num(lost) + ' fans gone and the apology is public.', 'bad');
+    pushRecap(st, '💣', 'Denial backfired · ' + f.who, 'bad');
+  }
+
+  /* ========================== streaming platforms ==========================
+     The opposite risk shape to a tour: paid to you the week you sign, billed
+     back every week of the term, and worth nothing at all unless something is
+     charting. The weekly commitment is a KP.ledger line item like any other
+     recurring cost, so the runway number never has to be corrected.
+     ======================================================================== */
+
+  E.dealBlock = function (st, key) {
+    const spec = KP.platforms.find(p => p.k === key);
+    if (!spec) return 'No such platform.';
+    const deals = st.company.deals || [];
+    if (deals.some(d => d.k === key)) return 'That deal is already running.';
+    if (deals.length >= KP.deals.maxDeals) {
+      return 'You are already signed to ' + KP.deals.maxDeals + ' platforms.';
+    }
+    if (KP.standing(st) < spec.rep) return spec.name + ' needs standing ' + spec.rep + '.';
+    if (KP.totalFans(st) < spec.fans) {
+      return spec.name + ' needs ' + U.num(spec.fans) + ' fans on the books.';
+    }
+    return null;
+  };
+
+  E.takeDeal = function (st, key) {
+    const spec = KP.platforms.find(p => p.k === key);
+    const blocked = E.dealBlock(st, key);
+    if (blocked) return { ok: false, msg: blocked };
+    const d = {
+      id: U.uid('deal'), k: spec.k, weeks: spec.weeks, weeksLeft: spec.weeks,
+      advance: spec.advance, paid: 0, earned: 0, tookAbs: KP.absWeek(st)
+    };
+    st.company.deals.push(d);
+    // An advance is revenue against future streams, so an investor's share comes
+    // out of it exactly as it comes out of the streams themselves.
+    const net = E.earn(st, spec.advance, 'deal');
+    KP.log(spec.name + ' signed · ' + U.money(net) + ' advance · ' + U.money(spec.weekly) +
+      '/week for ' + spec.weeks + ' weeks · streaming ×' + spec.streamMul.toFixed(2) + '.', 'big');
+    pushRecap(st, '🌐', spec.name + ' signed · ' + U.money(net), '');
+    return { ok: true, net, deal: d };
+  };
+
+  /* How much of the week's streaming money the deals are responsible for, split
+     between them by how much multiplier each one brought. Nothing is credited
+     here — this only books who earned it, so the term can be judged when it
+     ends. */
+  function creditDeals(st, streamRev) {
+    const deals = KP.activeDeals(st);
+    if (!deals.length) return;
+    const mul = KP.streamMul(st);
+    if (!(mul > 1)) return;
+    const extra = streamRev * (1 - 1 / mul);
+    let denom = 0;
+    deals.forEach(d => { const sp = KP.platformSpec(d); if (sp) denom += sp.streamMul - 1; });
+    if (!(denom > 0)) return;
+    deals.forEach(d => {
+      const sp = KP.platformSpec(d);
+      if (sp) d.earned += extra * (sp.streamMul - 1) / denom;
+    });
+  }
+
+  /* Step 5c. The weekly fee is inside KP.ledger and has already been billed by
+     step 5 — exactly the arrangement a loan instalment has — so this only counts
+     the term down and judges the deal when it runs out. */
+  E.serviceDeals = function (st) {
+    const deals = st.company.deals || [];
+    if (!deals.length) return;
+    const done = [];
+    deals.forEach(d => {
+      const sp = KP.platformSpec(d);
+      if (!sp) { done.push(d); return; }
+      d.paid += sp.weekly;
+      d.weeksLeft--;
+      if (d.weeksLeft > 0) return;
+      done.push(d);
+      const won = d.earned >= d.paid;
+      st.company.rep = U.clamp(st.company.rep +
+        (won ? KP.deals.exitRep : -KP.deals.exitRepBad), 0, 100);
+      KP.log(won
+        ? sp.name + ' has run its term — ' + U.money(d.earned) + ' of streaming against ' +
+          U.money(d.paid) + ' of fees. They want to re-sign.'
+        : sp.name + ' has run its term — ' + U.money(d.earned) + ' of streaming against ' +
+          U.money(d.paid) + ' of fees. Nobody is calling back.', won ? 'good' : 'bad');
+      pushRecap(st, won ? '🌐' : '📉', sp.name + ' ended · ' + U.money(d.earned) + ' earned',
+        won ? 'good' : 'bad');
+    });
+    if (done.length) st.company.deals = deals.filter(d => done.indexOf(d) < 0);
+  };
+
+  /* Ending one early. There is no buyout: a platform contract runs its term, and
+     the only thing the player can do is not sign the next one. */
+  E.dealsFull = (st) => (st.company.deals || []).length >= KP.deals.maxDeals;
 
   /* ================================ finance ================================
      A loan and an investor are the same record with opposite risk: the loan
@@ -1426,16 +1852,21 @@
       Math.max(floor, ourCp > 0 ? total / ourCp * A.rivalRateShare : 0);
     const salesPerCp = per(ours.reduce((s, a) => s + a.sales, 0), A.rivalSalesPerPoint);
     const fansPerCp = per(ours.reduce((s, a) => s + a.fans, 0), A.rivalFansPerPoint);
-    const popPerCp = per(ours.reduce((s, a) => {
+    // The Popularity Award is a vote, and a vote is cast by the half of a fandom
+    // that actually turns up — so the player's own crowd is counted at its
+    // loyalty. Read through one expression, because the rate the rivals are
+    // synthesised at is MEASURED off this same sum: quoting it two different
+    // ways here would silently re-price every rival on the ballot.
+    const popOf = (a) => {
       const g = a.groupId ? st.groups.find(x => x.id === a.groupId) : null;
-      return s + (g ? g.fans : a.fans);
-    }, 0), A.rivalFansPerPoint * A.rivalPopMul);
+      return (g ? g.fans : a.fans) * (g ? KP.fanMods(g).merch : 1);
+    };
+    const popPerCp = per(ours.reduce((s, a) => s + popOf(a), 0), A.rivalFansPerPoint * A.rivalPopMul);
 
     acts.forEach(a => {
-      const g = a.mine && a.groupId ? st.groups.find(x => x.id === a.groupId) : null;
       a._sales = a.mine ? a.sales : Math.round(a.cp * salesPerCp);
       a._fans = a.mine ? a.fans : Math.round(a.cp * fansPerCp);
-      a._pop = a.mine ? (g ? g.fans : a.fans) : Math.round(a.cp * popPerCp);
+      a._pop = a.mine ? Math.round(popOf(a)) : Math.round(a.cp * popPerCp);
       a._stages = a.mine ? a.stages : Math.round(a.weeks * A.rivalStagePerWeek);
       a._variety = a.mine
         ? a.variety * A.varietySynth.show + a.bestVariety * A.varietySynth.best
@@ -1494,8 +1925,13 @@
     // to be damped (KP.income.fanSaturation): undamped it is compound interest on
     // an annual timer, and the prizes it pays for are decided by the sales and
     // fandom axes it just inflated — the ceremony would be bidding for itself.
-    g.fans += fanGain(g, g.fans * p.fansPct);
+    gainFans(g, g.fans * p.fansPct);
     g.momentum = U.clamp(g.momentum + p.momentum, 0, 100);
+    // A trophy is the one thing that moves both halves of the fandom at once:
+    // the public thinks better of them tonight, and the people already there
+    // have something to point at — which is what pays the dilution back.
+    bumpSenti(g, 3 + p.prestige * 1.5);
+    bumpLoyal(g, KP.fandom.loyalTrophy + p.prestige * .5);
     g.trophies = g.trophies || [];
     g.trophies.unshift({ y: year, k: p.k, ic: p.ic, name: p.name });
   };
@@ -1518,9 +1954,14 @@
         const g = U.pick(st.groups.filter(x => x.fans > 3000));
         const m = U.pick(KP.memberOf(st, g));
         if (!m) return null;
-        const boost = fanGain(g, g.fans * U.rnd(.05, .14) + 4000 * traitMul(m, 'viral'));
-        g.fans += boost;
+        // The purest example of what gainFans is for: a spike worth a tenth of
+        // the fandom arrives at newFanLoyal and takes several points of loyalty
+        // out of the average on the way in. Virality is real and it is shallow.
+        const boost = gainFans(g, (g.fans * U.rnd(.05, .14) + 4000 * traitMul(m, 'viral'))
+          * KP.fanMods(g).acq);
         g.momentum = U.clamp(g.momentum + 7, 0, 100);
+        // A clip that travels travels everywhere, so a little of it lands abroad.
+        g.intl = U.clamp(KP.intlOf(g) + U.rnd(.004, .012), 0, KP.fandom.intlCap);
         return { ic: '📱', text: m.name + '\'s fancam went viral — +' + U.num(boost) + ' fans', kind: 'good' };
       }
     },
@@ -1533,16 +1974,28 @@
         return { ic: '💄', text: g.name + ' signed a cosmetics CF · ' + U.money(fee), kind: 'good' };
       }
     },
+    /* A story breaks. This is the one event that does not resolve itself: it
+       hands the player a decision and a week to make it, and E.nextWeek answers
+       it with silence if they do not. Fame is what attracts it — a group nobody
+       is watching is a group nobody is writing about — so the roll is taken
+       against the same pressure number the sasaeng incidents are. */
     {
-      k: 'dating', p: .05, need: st => st.groups.some(g => g.fans > 40000),
+      k: 'scandal', p: .09,
+      need: st => !st.scandal && st.groups.some(g =>
+        g.fans > KP.scandal.minFans && KP.memberOf(st, g).length),
       run(st) {
-        const g = U.pick(st.groups.filter(x => x.fans > 40000));
+        const pool = st.groups.filter(g => g.fans > KP.scandal.minFans && KP.memberOf(st, g).length);
+        // Weighted by pressure, so the group living under a camera is the group
+        // it happens to — and a quiet mid-table act is left alone for years.
+        const total = pool.reduce((s, g) => s + 1 + KP.pressure(st, g), 0);
+        let r = Math.random() * total, g = pool[pool.length - 1];
+        for (const x of pool) { r -= 1 + KP.pressure(st, x); if (r <= 0) { g = x; break; } }
+        if (!U.chance(.25 + KP.pressure(st, g) / 140)) return null;
         const m = U.pick(KP.memberOf(st, g));
-        const lost = Math.round(g.fans * U.rnd(.03, .09));
-        g.fans = Math.max(0, g.fans - lost);
-        g.momentum = U.clamp(g.momentum - 10, 0, 100);
-        if (m) m.morale = U.clamp(m.morale - 14, 0, 100);
-        return { ic: '📰', text: 'Dating rumour about ' + (m ? m.name : g.name) + ' — −' + U.num(lost) + ' fans', kind: 'bad' };
+        const s = E.openScandal(st, g, m);
+        if (!s) return null;
+        const spec = KP.scandalSpec(s);
+        return { ic: spec.ic, text: spec.name + ' · ' + m.name + ' — the office needs an answer', kind: 'bad' };
       }
     },
     {
@@ -1598,6 +2051,11 @@
                 st.chart.forEach((r, i) => { r.rank = i + 1; });
                 // Their diary goes with them. The fees do not come back.
                 st.bookings = (st.bookings || []).filter(b => b.groupId !== g.id);
+                // ...and so does any story about them. A scandal left pointing at
+                // a group that no longer exists is a modal with nobody in it and
+                // a silence outcome nobody can be charged for.
+                if (st.scandal && st.scandal.gid === g.id) st.scandal = null;
+                if (st.fallout && st.fallout.gid === g.id) st.fallout = null;
                 disbanded = g.name;
               }
             }
@@ -1679,6 +2137,14 @@
 
     const wasSeason = KP.seasonNow(st).k;
     st.recap = [];
+
+    // 0. A story that was still open when the week turned has been answered by
+    //    not answering it. Before the clock moves, so the week it is filed under
+    //    is the week it broke — and so a player who closes the tab on a scandal
+    //    gets the silence outcome exactly once rather than a modal that follows
+    //    them forever.
+    if (st.scandal) E.scandalRespond(st, 'silence');
+
     st.week++;
     if (st.week > KP.WEEKS_PER_YEAR) {
       st.week = 1;
@@ -1749,12 +2215,20 @@
         g.fans = Math.round(g.fans * .996);
         g.momentum = U.clamp(g.momentum - 1.6, 0, 100);
       }
-      E.earn(st, g.fans * KP.income.merchPerFan, 'merch');
     });
 
     // 4b. the rival groups read the same ranking, off the full chart rather than
     //     the twenty-five rows that get stored. Nothing here touches the books.
     E.rivalChartWeek(st, chart);
+
+    // 4c. the fandom settles — loyalty, sentiment, the international split, and
+    //     whoever is standing outside the dorm — and THEN pays. The merch credit
+    //     lives inside E.fandomWeek because it is keyed to numbers this step has
+    //     just moved: billing it in step 4 would price the week before the
+    //     scandal that happened in it. A denial that was a lie comes home here
+    //     too, weeks after the week it was free in.
+    resolveFallout(st);
+    E.fandomWeek(st);
 
     // 5. books
     st.company.money -= KP.weeklyBurn(st);
@@ -1764,6 +2238,11 @@
     //     weeklyBurn, so this only amortises what was just paid — and judges
     //     whether it was paid with money that existed.
     E.serviceDebt(st);
+
+    // 5c. platform deals, on exactly the same terms as 5b: the weekly commitment
+    //     is a KP.ledger line and step 5 has already paid it, so this only counts
+    //     the term down and judges the deal on the way out.
+    E.serviceDeals(st);
 
     // 6. events
     runEvents(st);
@@ -1861,6 +2340,14 @@
       memberIds: members.map(m => m.id),
       fans: Math.round(2200 + st.company.rep * 260 + E.groupScore(members, opts.concept) * 120),
       momentum: 22,
+      // The three numbers that say what kind of fandom this is, at the values
+      // every modifier in KP.fandom is written as a deviation from: a group
+      // debuts on 1.00 across the board and earns its shape from there.
+      loyal: KP.fandom.loyal0,
+      senti: KP.fandom.senti0,
+      intl: KP.fandom.intl0,
+      tourLegs: 0,
+      toursY: 0,
       releases: [],
       active: null,
       stagesY: 0,
