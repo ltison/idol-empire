@@ -506,6 +506,14 @@
   /* ============================== training ================================= */
 
   function trainWeek(st, t) {
+    // A name the public knows is a wasting asset. Ten weeks of television is
+    // worth a fandom at the debut showcase and nothing at all three years later,
+    // which is the pressure a survival-show signing puts on the training plan:
+    // debut them before they are ready, or debut somebody nobody remembers.
+    if (t.fame > 0 && !t.groupId) {
+      t.fame = t.fame * KP.survival.fameDecay;
+      if (t.fame < .5) t.fame = 0;
+    }
     // Two ways to be off the schedule, and they are not the same week. An injury
     // is something that happened to somebody; a hiatus is a decision the agency
     // made about a story, and the point of it is that the person actually rests.
@@ -585,8 +593,13 @@
     const studio = st.company.facilities.studio;
     const mkt = st.company.staff.marketing;
 
+    // The room, on top of the six stat blocks in it. Chemistry lands on quality
+    // rather than on hype on purpose: what a line-up that gets on produces is a
+    // better record, not a better press cycle — and it is the one number in the
+    // planner the player cannot buy this week.
+    const chem = KP.chemPerf(st, g);
     const skill = E.groupScore(members, conceptKey);
-    const quality = U.clamp(.46 * skill + .32 * prod.q + .22 * cho.q + (studio - 1) * 1.6, 0, 100);
+    const quality = U.clamp((.46 * skill + .32 * prod.q + .22 * cho.q + (studio - 1) * 1.6) * chem, 0, 100);
     const trend = E.conceptTrend(st, conceptKey);
     const fresh = g.lastConcept === conceptKey ? .93 : 1.04;   // repeating a concept gets stale
     const visualPull = .5 * mv.q + .5 * sty.q;
@@ -623,7 +636,7 @@
     const units = Math.round((g.fans * (.10 + hype / 700) + hype * 150) * mods.sales);
     return {
       quality, hype, points, cost: E.planCost(sel), promo, trend, fatigue, gap, debutMul,
-      mods, units, season: KP.seasonOfAbs(abs)
+      mods, units, chem, season: KP.seasonOfAbs(abs)
     };
   };
 
@@ -731,6 +744,16 @@
     rel.fansGained += gained;
     E.ybAct(st, g).fans += gained;
 
+    // A sub-unit promoting is the parent act on television under another name,
+    // and some of what it picks up follows the whole group home. This is the
+    // half that makes a unit worth forming rather than a second set of costs —
+    // and it goes through gainFans like every other new-fan number, so the
+    // feedback is damped by the parent's own size and never compounds.
+    if (KP.isUnit(g)) {
+      const parent = KP.parentOf(st, g);
+      if (parent) gainFans(parent, gained * KP.units.feedback);
+    }
+
     if (rank === 1) {
       rel.wins++;
       st.stats.wins++;
@@ -765,6 +788,14 @@
       // quiet run: the dilution the promotion weeks already paid is the cost of
       // having grown at all.
       if (rel.peak <= 3) bumpLoyal(g, KP.fandom.loyalHit);
+      // A run they can be proud of, or one they cannot. The only bond move in
+      // the game that is decided by the chart rather than by a diary.
+      bumpCast(st, g, KP.memberOf(st, g), rel.peak <= 3 ? KP.bonds.hit
+        : rel.peak > 30 ? KP.bonds.flop : 0);
+      if (KP.isUnit(g) && rel.peak <= 3) {
+        const parent = KP.parentOf(st, g);
+        if (parent) bumpLoyal(parent, KP.fandom.loyalHit * KP.units.loyalBack);
+      }
       const verdict = rel.peak === 1 ? 'a #1 hit' : rel.peak <= 10 ? 'a top-10 run' : 'a quiet run';
       KP.log('Promotions for “' + rel.title + '” wrapped — ' + verdict +
         ' (peak #' + rel.peak + ', ' + U.num(rel.fansGained) + ' new fans).', rel.peak <= 10 ? 'good' : 'info');
@@ -806,6 +837,19 @@
   function castTalker(cast) {
     return cast.slice().sort((a, b) => E.varietyScore(b) - E.varietyScore(a))[0] || null;
   }
+
+  /* How well a variety booking is going to go, in one expression, because the
+     modal quotes it and the week grades it. The funniest person in the room
+     carries it — and the room carries them: a line-up that actually gets on is
+     funnier on a panel show than the same six people who are not speaking.
+     Chemistry lands here rather than on the fan numbers because this is the one
+     booking that is GRADED, and a grade is a reception. */
+  function varietyEdge(st, g, cast, show) {
+    const t = castTalker(cast);
+    const score = t ? E.varietyScore(t) * KP.chemEdge(st, g) : 0;
+    return { talker: t, score, edge: (score - show.need) / KP.bookings.needScale };
+  }
+  E.varietyEdge = varietyEdge;
 
   E.grade = function (edge) {
     const B = KP.bookings;
@@ -902,10 +946,10 @@
       exposed: cast.filter(m => m.stamina - show.stamina < B.injuryFloor).length
     };
     if (kind === 'variety') {
-      const t = castTalker(cast);
-      pv.talker = t;
-      pv.score = t ? E.varietyScore(t) : 0;
-      pv.edge = (pv.score - show.need) / B.needScale;
+      const ve = varietyEdge(st, g, cast, show);
+      pv.talker = ve.talker;
+      pv.score = ve.score;
+      pv.edge = ve.edge;
       // The reception roll is uniform, so the odds are a straight read of it.
       pv.pViral = U.clamp((pv.edge - B.viralAt + B.gradeSpread) / (B.gradeSpread * 2), 0, 1);
       pv.pFlat = U.clamp((B.flatAt - pv.edge + B.gradeSpread) / (B.gradeSpread * 2), 0, 1);
@@ -1083,6 +1127,10 @@
     g.momentum = U.clamp(g.momentum + show.momentum, 0, 100);
     bumpLoyal(g, KP.fandom.loyalStage);
     cast.forEach(m => { m.morale = U.clamp(m.morale + show.morale, 0, 100); });
+    // Whoever was actually in the room. A booking is where bonds are built, and
+    // it is per-cast rather than per-group so a member on hiatus does not come
+    // back closer to people they never saw.
+    bumpCast(st, g, cast, KP.bonds.together);
     payStamina(st, cast, show.stamina);
     g.stagesY++;
     st.stats.stages++;
@@ -1102,8 +1150,9 @@
     const cast = presentMembers(st, g);
     if (!cast.length) return bookingMissed(st, g, show);
 
-    const talker = castTalker(cast);
-    const grade = E.grade((E.varietyScore(talker) - show.need) / KP.bookings.needScale);
+    const ve = varietyEdge(st, g, cast, show);
+    const talker = ve.talker;
+    const grade = E.grade(ve.edge);
     const gained = gainFans(g, (g.fans * show.fansPct + show.fansFlat) * grade.fans * KP.fanMods(g).acq);
     st.company.rep = U.clamp(st.company.rep + show.repGain * grade.rep, 0, 100);
     g.momentum = U.clamp(g.momentum + show.momentum * grade.momentum, 0, 100);
@@ -1117,6 +1166,8 @@
       m.stats.variety = Math.min(m.potential.variety, m.stats.variety + U.rnd(show.train * .45, show.train));
       m.morale = U.clamp(m.morale + (grade.k === 'flat' ? KP.bookings.flatMorale : show.morale), 0, 100);
     });
+    // A room that laughed is worth more than one that did not, both ways.
+    bumpCast(st, g, cast, KP.bonds.together * (grade.k === 'flat' ? -1 : grade.k === 'viral' ? 2 : 1));
     payStamina(st, cast, show.stamina);
     g.varietyY++;
     st.stats.varietyShows++;
@@ -1192,6 +1243,8 @@
     cast.forEach(m => {
       m.morale = U.clamp(m.morale + (grade === 'undersold' ? L.undersoldMorale : v.morale), 0, 100);
     });
+    // A night nobody came to is a long bus back. A sold-out one is not.
+    bumpCast(st, g, cast, KP.bonds.together * (grade === 'undersold' ? -1 : grade === 'triumph' ? 2 : 1));
     payStamina(st, cast, v.stamina);
 
     const soldOut = fill >= L.soldOutAt;
@@ -1281,7 +1334,10 @@
       // 4. sasaeng and antifan pressure. Fame buys an audience outside the dorm;
       //    the dorm level is what buys it back, which is the second job that
       //    makes a Lv4 dormitory worth more than faster recovery.
-      const press = KP.pressure(st, g);
+      //    Main groups only: a sub-unit is the same people under a second name,
+      //    and the crowd outside the dorm is not there twice. Running it over
+      //    both would make forming a unit a standing morale tax on its members.
+      const press = KP.isUnit(g) ? 0 : KP.pressure(st, g);
       if (press > F.pressFloor) {
         KP.memberOf(st, g).forEach(m => {
           m.morale = U.clamp(m.morale - press / F.pressDrag, 0, 100);
@@ -1520,6 +1576,543 @@
   /* Ending one early. There is no buyout: a platform contract runs its term, and
      the only thing the player can do is not sign the next one. */
   E.dealsFull = (st) => (st.company.deals || []).length >= KP.deals.maxDeals;
+
+  /* ====================== relationships and chemistry ======================
+     One bond per pair, and this is the only place any of them move. Everything
+     that writes one goes through bumpBond, which routes a sub-unit's write to
+     the parent that actually owns the pair (KP.bondHost) and rounds on the way
+     in — KP.save() stringifies the whole state every week, and a full-precision
+     float per pair in every group is a real share of the file.
+     ======================================================================== */
+
+  function bumpBond(st, g, a, b, d) {
+    if (a === b || !d) return;
+    const host = KP.bondHost(st, g);
+    host.bonds = host.bonds || {};
+    const k = KP.bondKey(a, b);
+    host.bonds[k] = Math.round(U.clamp(KP.bondOf(host, a, b) + d, 0, 100) * 10) / 10;
+  }
+  E.bumpBond = bumpBond;
+
+  /* Every pair inside a cast, which is what "they were in the same room" means.
+     A cast of one moves nothing, and that is correct: a solo variety booking is
+     not a thing the group did together. */
+  function bumpCast(st, g, cast, d) {
+    for (let i = 0; i < cast.length; i++) {
+      for (let j = i + 1; j < cast.length; j++) bumpBond(st, g, cast[i].id, cast[j].id, d);
+    }
+  }
+  E.bumpCast = bumpCast;
+
+  /* A line-up that debuted together starts somewhere; one that somebody joined
+     later starts at `newcomer` against everybody already there. `only` limits
+     the seeding to pairs touching one person, which is the join case. */
+  function seedBonds(st, g, members, value, only) {
+    for (let i = 0; i < members.length; i++) {
+      for (let j = i + 1; j < members.length; j++) {
+        const a = members[i], b = members[j];
+        if (only && a.id !== only && b.id !== only) continue;
+        const host = KP.bondHost(st, g);
+        host.bonds = host.bonds || {};
+        host.bonds[KP.bondKey(a.id, b.id)] =
+          Math.round(U.clamp(value(), 0, 100) * 10) / 10;
+      }
+    }
+  }
+
+  /* Step 2c. Bonds drift toward `base` with nothing happening, are built by
+     being in the same place — a promotion cycle here, a booking's cast in the
+     resolvers — and are spent by a schedule that left everybody empty. Then the
+     room pays the people in it, which is the only thing chemistry does that the
+     player does not have to go looking for. */
+  E.bondWeek = function (st) {
+    const B = KP.bonds;
+    KP.mainGroups(st).forEach(g => {
+      const members = KP.memberOf(st, g);
+      const promoting = !!g.active;
+      for (let i = 0; i < members.length; i++) {
+        for (let j = i + 1; j < members.length; j++) {
+          const a = members[i], b = members[j];
+          let d = (B.base - KP.bondOf(g, a.id, b.id)) * B.drift;
+          if (promoting) d += B.promo;
+          if (a.stamina < B.tiredBelow && b.stamina < B.tiredBelow) d += B.tired;
+          bumpBond(st, g, a.id, b.id, d);
+        }
+      }
+    });
+    // A unit is the same people in a smaller room, and they come back closer.
+    // Written against the parent's map, so it shows up on the group card that
+    // the sub-unit was good for them.
+    st.groups.forEach(g => {
+      if (KP.isUnit(g) && g.active) bumpCast(st, g, KP.memberOf(st, g), KP.units.bondUnit);
+    });
+    // What the room is worth to the people in it. Small per week and signed both
+    // ways: a group that gets on carries its own morale, and one that does not
+    // grinds it down a fraction at a time until a renewal year arrives.
+    KP.mainGroups(st).forEach(g => {
+      const members = KP.memberOf(st, g);
+      if (members.length < 2) return;
+      const lift = U.clamp((KP.chemistry(st, g) - B.mid) * B.moralePer, -B.moraleCap, B.moraleCap);
+      if (lift) members.forEach(m => { m.morale = U.clamp(m.morale + lift, 0, 100); });
+    });
+  };
+
+  /* ========================== line-up changes ==============================
+     Everything that removes a person from a group goes through E.leaveGroup and
+     everything that removes a group goes through disbandGroup. Both used to be
+     written inline inside the burnout event, which is why positions were never
+     reassigned after a departure and a group could be left holding a Leader who
+     had walked out eighteen months earlier.
+     ======================================================================== */
+
+  function disbandGroup(st, g, reason) {
+    // A unit cannot outlive the act it was drawn out of.
+    if (!KP.isUnit(g)) KP.unitsOf(st, g.id).forEach(u => disbandGroup(st, u, 'parent'));
+    g.active = null;
+    st.groups = st.groups.filter(x => x.id !== g.id);
+    // Pulling their row out of the published chart leaves a hole in the
+    // numbering and the Chart tab prints r.rank straight out, so everyone below
+    // the withdrawn song moves up one.
+    st.chart = (st.chart || []).filter(r => r.groupId !== g.id);
+    st.chart.forEach((r, i) => { r.rank = i + 1; });
+    // Their diary goes with them. The fees do not come back.
+    st.bookings = (st.bookings || []).filter(b => b.groupId !== g.id);
+    // ...and so does any story about them: a scandal pointing at a group that no
+    // longer exists is a modal with nobody in it.
+    if (st.scandal && st.scandal.gid === g.id) st.scandal = null;
+    if (st.fallout && st.fallout.gid === g.id) st.fallout = null;
+    // A unit's members were never on its payroll — they go back to being what
+    // they already were, which is members of the parent.
+    if (!KP.isUnit(g)) {
+      st.trainees.forEach(t => { if (t.groupId === g.id) clearContract(t); });
+    }
+    return g.name;
+  }
+  E.disbandGroup = disbandGroup;
+
+  function clearContract(t) {
+    t.groupId = null;
+    t.position = null;
+    delete t.debutAbs;
+    delete t.contractAbs;
+  }
+
+  /* One person out of one line-up, whatever put them there: a contract that ran
+     out, a graduation the player decided on, or somebody who stopped believing.
+     Returns { ok, disbanded } — the caller decides what happens to the person
+     afterwards, because a graduate goes back to the trainee room and an expired
+     contract walks out of the building. */
+  E.leaveGroup = function (st, t, reason) {
+    const g = t.groupId ? st.groups.find(x => x.id === t.groupId) : null;
+    if (!g) return { ok: false, msg: 'They are not in a group.' };
+    const B = KP.bonds, C = KP.contracts;
+
+    // A sub-unit shrinks if it can still field a line-up and folds if it cannot.
+    KP.unitsOf(st, g.id).forEach(u => {
+      if (u.memberIds.indexOf(t.id) < 0) return;
+      const spec = KP.unitSpec(u);
+      const left = u.memberIds.filter(id => id !== t.id);
+      if (spec && left.length >= spec.min) {
+        u.memberIds = left;
+        KP.log(u.name + ' continues as ' + left.length + '.', 'info');
+      } else {
+        disbandGroup(st, u, 'member');
+        KP.log(u.name + ' is over — ' + t.name + ' was half of it.', 'bad');
+      }
+    });
+
+    // How close they were to the room decides how hard the room takes it.
+    const rest = KP.memberOf(st, g).filter(m => m.id !== t.id);
+    const close = rest.length
+      ? rest.reduce((s, m) => s + KP.bondOf(g, t.id, m.id), 0) / rest.length
+      : B.base;
+
+    g.memberIds = g.memberIds.filter(id => id !== t.id);
+    // Their pairs go with them; a bond map that keeps a departed member is a
+    // chemistry reading averaging in somebody who is not in the building.
+    Object.keys(g.bonds || {}).forEach(k => {
+      if (k.split('|').indexOf(t.id) >= 0) delete g.bonds[k];
+    });
+    clearContract(t);
+
+    if (!g.memberIds.length) {
+      const name = disbandGroup(st, g, reason);
+      KP.log(name + ' has disbanded — nobody is left in the group.', 'bad');
+      pushRecap(st, '💔', name + ' disbanded', 'bad');
+      st.stats.departures++;
+      return { ok: true, disbanded: name };
+    }
+
+    // The three things a departure costs, and they are all about the people who
+    // stayed: a room that has just watched somebody go, a public that has an
+    // opinion about it, and the fans who were there for that member.
+    const mul = close > B.leaveClose ? 2 : 1;
+    rest.forEach((a, i) => rest.slice(i + 1).forEach(b => bumpBond(st, g, a.id, b.id, B.leaveBond * mul)));
+    E.assignPositions(st, KP.memberOf(st, g));
+    const lost = Math.round(g.fans * C.leaveFansPct * mul);
+    g.fans = Math.max(0, g.fans - lost);
+    bumpSenti(g, C.leaveSenti);
+    st.company.rep = U.clamp(st.company.rep - C.leaveRep, 0, 100);
+    g.momentum = U.clamp(g.momentum - 8, 0, 100);
+    st.stats.departures++;
+    return { ok: true, lost, left: g.memberIds.length };
+  };
+
+  /* The other half: somebody joins a line-up that already exists. They arrive as
+     a stranger to everybody in it — KP.bonds.newcomer, against every existing
+     pair's history — which is the whole cost of the move. The fee is for the
+     showcase; what it actually costs is a season of chemistry. */
+  E.joinGroup = function (st, groupId, traineeId) {
+    const g = st.groups.find(x => x.id === groupId);
+    const t = st.trainees.find(x => x.id === traineeId);
+    if (!g || !t) return { ok: false, msg: 'Nobody by that name.' };
+    if (KP.isUnit(g)) return { ok: false, msg: 'A unit takes its members from its parent group.' };
+    if (t.groupId) return { ok: false, msg: t.name + ' is already in a group.' };
+    if (g.memberIds.length >= 7) return { ok: false, msg: 'Seven members is the cap.' };
+    const cost = KP.costs.lineupShowcase;
+    if (st.company.money < cost) {
+      return { ok: false, msg: 'Introducing a member costs ' + U.money(cost) + '.' };
+    }
+    st.company.money -= cost;
+    t.groupId = g.id;
+    t.focus = 'dance';
+    t.debutAbs = KP.absWeek(st);
+    t.contractAbs = t.debutAbs + KP.contracts.termYears * KP.WEEKS_PER_YEAR;
+    g.memberIds.push(t.id);
+    seedBonds(st, g, KP.memberOf(st, g),
+      () => KP.bonds.newcomer + U.rnd(-6, 6), t.id);
+    E.assignPositions(st, KP.memberOf(st, g));
+    // A new face is news, and the news is neither good nor bad: some of the
+    // public turns up to look and some of the fandom is not having it.
+    gainFans(g, g.fans * .02 + t.fame * KP.survival.fameFans);
+    bumpSenti(g, -2);
+    g.momentum = U.clamp(g.momentum + 4, 0, 100);
+    KP.log(t.name + ' has joined ' + g.name + ' · ' + U.money(cost) +
+      ' — the room does not know them yet.', 'info');
+    return { ok: true, cost };
+  };
+
+  /* A graduation: out of the line-up, back into the trainee room, still on the
+     books. The contract goes with the group — they are not an idol any more. */
+  E.graduate = function (st, traineeId) {
+    const t = st.trainees.find(x => x.id === traineeId);
+    if (!t) return { ok: false, msg: 'Nobody by that name.' };
+    const g = t.groupId ? st.groups.find(x => x.id === t.groupId) : null;
+    if (!g) return { ok: false, msg: 'They are not in a group.' };
+    const name = g.name;
+    const r = E.leaveGroup(st, t, 'graduate');
+    if (!r.ok) return r;
+    KP.log(t.name + ' has graduated from ' + name + '.', 'bad');
+    pushRecap(st, '🎓', t.name + ' left ' + name, 'bad');
+    return r;
+  };
+
+  /* ============================== sub-units ================================
+     A unit is a group record with a parent, which is why nothing below this
+     comment had to learn about it: the chart, the books, the schedule board and
+     the yearbook all take a group. What a unit costs is the roster it is drawn
+     from — the same people, the same stamina, twice the diary.
+     ======================================================================== */
+
+  E.unitBlock = function (st, parent, kindKey, memberIds) {
+    const spec = KP.unitKind(kindKey);
+    if (!spec) return 'No such unit.';
+    if (!parent) return 'That group is gone.';
+    if (KP.isUnit(parent)) return 'A unit is drawn out of a group, not out of another unit.';
+    if (parent.releases.length < spec.needReleases) {
+      return spec.name + 's need ' + spec.needReleases + ' releases behind the group · ' +
+        parent.name + ' has ' + parent.releases.length + '.';
+    }
+    if (parent.fans < spec.needFans) return 'Needs ' + U.num(spec.needFans) + ' fans.';
+    if (KP.unitsOf(st, parent.id).length >= KP.units.maxPer) {
+      return parent.name + ' is already running ' + KP.units.maxPer + ' units.';
+    }
+    const ids = memberIds || [];
+    if (ids.length < spec.min || ids.length > spec.max) {
+      return spec.min === spec.max
+        ? spec.name + 's are ' + spec.min + ' member' + (spec.min === 1 ? '' : 's') + '.'
+        : spec.name + 's are ' + spec.min + ' to ' + spec.max + ' members.';
+    }
+    if (ids.some(id => parent.memberIds.indexOf(id) < 0)) return 'They are not in that group.';
+    const busy = ids.find(id => KP.inAUnit(st, id));
+    if (busy) {
+      const t = st.trainees.find(x => x.id === busy);
+      return (t ? t.name : 'One of them') + ' is already in a unit.';
+    }
+    if (st.company.money < spec.cost) {
+      return 'A ' + spec.name.toLowerCase() + ' showcase costs ' + U.money(spec.cost) + '.';
+    }
+    return null;
+  };
+
+  E.formUnit = function (st, opts) {
+    const parent = st.groups.find(x => x.id === opts.parentId);
+    const spec = KP.unitKind(opts.kind);
+    const ids = (opts.memberIds || []).slice();
+    const blocked = E.unitBlock(st, parent, opts.kind, ids);
+    if (blocked) return { ok: false, msg: blocked };
+    const name = String(opts.name || '').trim();
+    if (!name) return { ok: false, msg: 'The unit needs a name.' };
+    if (st.groups.some(g => g.name === name)) return { ok: false, msg: 'You already have an act called that.' };
+
+    st.company.money -= spec.cost;
+    const F = KP.fandom;
+    const members = ids.map(id => st.trainees.find(t => t.id === id)).filter(Boolean);
+    const g = {
+      id: U.uid('u'),
+      parentId: parent.id,
+      unitKind: spec.k,
+      name,
+      kr: opts.kr || '',
+      concept: opts.concept,
+      lastConcept: null,
+      color: opts.color || parent.color,
+      fandom: parent.fandom,
+      memberIds: members.map(m => m.id),
+      // Drawn OUT of the parent's fandom rather than added to it: these are the
+      // people who already follow them, which is why the merch line is
+      // discounted and KP.totalFans does not count a unit at all.
+      fans: Math.round(parent.fans * U.rnd(spec.share[0], spec.share[1])),
+      momentum: 20,
+      // The half of a fandom that follows a sub-unit is the invested half.
+      loyal: U.clamp(KP.loyalOf(parent) + 6, 0, 100),
+      senti: KP.sentiOf(parent),
+      intl: KP.intlOf(parent),
+      tourLegs: 0, toursY: 0,
+      releases: [], active: null,
+      stagesY: 0, varietyY: 0, liveAbs: {}, livesY: 0, ticketsY: 0,
+      trophies: [],
+      bonds: {},              // unused: a unit reads its parent's, see KP.bondHost
+      debut: { y: st.year, w: st.week }
+    };
+    st.groups.push(g);
+    st.stats.units++;
+    st.company.rep = U.clamp(st.company.rep + 1, 0, 100);
+    // Being picked out of the line-up is a good week for the people picked.
+    members.forEach(m => { m.morale = U.clamp(m.morale + 8, 0, 100); });
+    KP.log('✧ ' + name + ' — a ' + spec.name.toLowerCase() + ' out of ' + parent.name +
+      ' (' + members.map(m => m.name).join(', ') + ').', 'big');
+    pushRecap(st, spec.ic, name + ' · ' + spec.name.toLowerCase() + ' of ' + parent.name, 'big');
+    return { ok: true, group: g };
+  };
+
+  E.disbandUnit = function (st, groupId) {
+    const g = st.groups.find(x => x.id === groupId);
+    if (!g || !KP.isUnit(g)) return { ok: false, msg: 'That is not a unit.' };
+    const parent = KP.parentOf(st, g);
+    const spec = KP.unitSpec(g);
+    // Whatever it built goes back where it came from — a fandom that followed
+    // two of them still follows the five.
+    if (parent) bumpLoyal(parent, KP.units.loyalBack * (g.releases.length ? 1 : 0));
+    st.company.rep = U.clamp(st.company.rep - KP.units.disbandRep, 0, 100);
+    const name = disbandGroup(st, g, 'unit');
+    KP.log(name + ' has wrapped up — ' + (spec ? spec.name.toLowerCase() : 'the unit') +
+      ' activities are over.', 'info');
+    return { ok: true, name };
+  };
+
+  /* ========================= contracts and the cliff =======================
+     Seven years from debut, and the decision opens a year out. E.renewContract
+     is the only way a term is extended and contractWeek is the only way one
+     ends — which is what keeps the date on the trainee card, the price in the
+     table and the week the person actually walks all quoting one number.
+     ======================================================================== */
+
+  E.renewContract = function (st, traineeId) {
+    const t = st.trainees.find(x => x.id === traineeId);
+    if (!t || !t.groupId) return { ok: false, msg: 'They have no contract to renew.' };
+    if (!KP.inRenewWindow(st, t)) {
+      const left = KP.contractLeft(st, t);
+      return { ok: false, msg: 'Their term still has ' +
+        Math.round((left - KP.contracts.windowWeeks) / KP.WEEKS_PER_YEAR * 10) / 10 +
+        ' years to run before it can be renegotiated.' };
+    }
+    if (!KP.willRenew(st, t)) {
+      return { ok: false, msg: t.name + ' will not re-sign at any price.' };
+    }
+    const cost = KP.renewCost(st, t);
+    if (st.company.money < cost) {
+      return { ok: false, msg: t.name + ' is asking ' + U.money(cost) + '.' };
+    }
+    const C = KP.contracts;
+    st.company.money -= cost;
+    const years = U.irnd(C.renewYears[0], C.renewYears[1]);
+    t.contractAbs += years * KP.WEEKS_PER_YEAR;
+    t.morale = U.clamp(t.morale + C.renewMorale, 0, 100);
+    const g = st.groups.find(x => x.id === t.groupId);
+    if (g) { bumpLoyal(g, C.renewLoyal); bumpSenti(g, C.renewSenti); }
+    st.stats.renewals++;
+    KP.log(t.name + ' has re-signed for ' + years + ' more years · ' + U.money(cost) + '.', 'good');
+    pushRecap(st, '✍️', t.name + ' re-signed · ' + years + ' years', 'good');
+    return { ok: true, cost, years };
+  };
+
+  /* Step 6b. Two warnings and then the cliff — the warnings are stateless
+     because the tick runs exactly once a week, so an `=== ` on the weeks left
+     fires exactly once per person and needs no flag on the record. */
+  E.contractWeek = function (st) {
+    const C = KP.contracts;
+    const abs = KP.absWeek(st);
+    // A copy, because leaving mutates st.trainees through E.leaveGroup.
+    st.trainees.slice().forEach(t => {
+      if (!t.groupId || typeof t.contractAbs !== 'number') return;
+      const left = t.contractAbs - abs;
+      if (left === C.windowWeeks) {
+        KP.log(t.name + '\'s contract enters its final year — the renewal table is open.', 'info');
+        pushRecap(st, '📄', t.name + ' · final year of their contract', '');
+      } else if (left === 8) {
+        KP.log(t.name + ' has eight weeks left on their contract' +
+          (KP.willRenew(st, t) ? ' and is asking ' + U.money(KP.renewCost(st, t)) + '.'
+            : ' and is not re-signing.'), 'bad');
+      }
+      if (left > 0) return;
+
+      const g = st.groups.find(x => x.id === t.groupId);
+      const gname = g ? g.name : 'the group';
+      const r = E.leaveGroup(st, t, 'contract');
+      if (!r.ok) return;
+      st.trainees = st.trainees.filter(x => x.id !== t.id);
+      KP.log(t.name + '\'s contract with ' + gname + ' has expired. They are leaving the company.', 'bad');
+      pushRecap(st, '🚪', t.name + ' left · contract expired', 'bad');
+      // Somebody with seven years of stages behind them does not sit at home.
+      // Only agencies of the player's own kind are in the market for them, on
+      // the same rule the audition room's poach follows.
+      if (U.chance(C.poachChance)) {
+        const pool = (st.rivals || []).filter(rr => {
+          const sp = KP.rivalSpec(rr);
+          return sp && sp.gender === st.company.gender;
+        });
+        if (pool.length) {
+          const rr = U.pick(pool);
+          const sp = KP.rivalSpec(rr);
+          if (rr.trainees.length >= KP.rivals.rosterCap) rr.trainees.shift();
+          rr.trainees.push(KP.stripRivalPerson(JSON.parse(JSON.stringify(t))));
+          KP.log(sp.name + ' has signed ' + t.name + '.', 'bad');
+        }
+      }
+    });
+  };
+
+  /* ============================ the survival show ==========================
+     Ten weeks of television for a finals night, and the finals night is the
+     mechanic: the public has been voting on `KP.screenPresence` while the
+     player has been reading ceilings, and the two rarely agree. Everything the
+     player does not sign is signed by somebody else in the same scene.
+
+     `ready` is a question with a deadline, on exactly the terms st.scandal is:
+     step 0 answers it with nobody if the week turns without an answer.
+     ======================================================================== */
+
+  E.survivalBlock = function (st) {
+    const S = KP.survival;
+    if (st.survival) return 'A show is already on air.';
+    if (KP.standing(st) < S.standing) return 'A broadcaster wants standing ' + S.standing + '.';
+    if (st.company.money < S.cost) return 'A season costs ' + U.money(S.cost) + '.';
+    return null;
+  };
+
+  E.startSurvival = function (st) {
+    const S = KP.survival;
+    const blocked = E.survivalBlock(st);
+    if (blocked) return { ok: false, msg: blocked };
+    st.company.money -= S.cost;
+    const cast = [];
+    for (let i = 0; i < S.cast; i++) {
+      const t = KP.makeTrainee(U.rnd(S.quality[0], S.quality[1]));
+      t.signCost = KP.signingCost(t);
+      t.votes = Math.round(U.rnd(S.voteBase[0], S.voteBase[1]));
+      t.fame = 0;
+      cast.push(t);
+    }
+    st.survival = {
+      startAbs: KP.absWeek(st),
+      endAbs: KP.absWeek(st) + S.weeks,
+      cast,
+      ready: false
+    };
+    KP.log('📺 A survival show is commissioned · ' + U.money(S.cost) + ' — ' + S.cast +
+      ' contestants, ' + S.weeks + ' weeks, and the public votes.', 'big');
+    pushRecap(st, '📺', 'Survival show on air · ' + S.weeks + ' weeks', 'big');
+    return { ok: true };
+  };
+
+  /* Step 6c. The votes accrue, the agency is on television every week whoever
+     wins, and on the last week the finals are called and the fame is handed out
+     by rank — which is what the player is really signing. */
+  E.survivalWeek = function (st) {
+    const S = KP.survival;
+    const sv = st.survival;
+    if (!sv || sv.ready) return;
+    sv.cast.forEach(t => {
+      t.votes = Math.max(0, t.votes + KP.screenPresence(t) * S.votePerWeek +
+        U.rnd(-S.voteNoise, S.voteNoise));
+    });
+    st.company.rep = U.clamp(st.company.rep + S.repWeek, 0, 100);
+    st.groups.forEach(g => bumpSenti(g, S.sentiWeek));
+    if (KP.absWeek(st) < sv.endAbs) return;
+
+    // Finals night. The cast is cut to the finalists and fame is handed out down
+    // the ranking — a name the country watched for ten weeks walks into a debut
+    // with a fandom, and that fame evaporates in the practice room.
+    const ranked = KP.survivalRanked(st).slice(0, S.finalists);
+    ranked.forEach((t, i) => {
+      const share = ranked.length > 1 ? i / (ranked.length - 1) : 0;
+      t.fame = Math.round(S.fameOf[1] + (S.fameOf[0] - S.fameOf[1]) * share);
+      t.votes = Math.round(t.votes);
+    });
+    sv.cast = ranked;
+    sv.ready = true;
+    KP.log('📺 The finals are in. ' + ranked[0].name + ' won the public vote — you may sign ' +
+      S.picks + ' of the ' + ranked.length + '.', 'big');
+    pushRecap(st, '📺', 'Survival finals · ' + ranked[0].name + ' won the vote', 'big');
+  };
+
+  /* The finals night's one decision. An empty list is a legal answer and it is
+     the one step 0 gives a player who closed the tab: everybody in that room is
+     signed by somebody, and it will not be you. */
+  E.survivalSign = function (st, ids) {
+    const S = KP.survival;
+    const sv = st.survival;
+    if (!sv || !sv.ready) return { ok: false, msg: 'There are no finals to settle.' };
+    const picked = (ids || [])
+      .map(id => sv.cast.find(t => t.id === id))
+      .filter(Boolean)
+      .slice(0, S.picks);
+
+    picked.forEach(t => {
+      delete t.votes;
+      t.signCost = 0;
+      t.focus = 'dance';
+      st.trainees.push(t);
+      KP.log('Signed ' + t.name + ' out of the finals — ceiling ' + KP.potentialOverall(t) +
+        ', and ' + t.fame + ' points of a name the public already knows.', 'good');
+    });
+
+    // Whatever is left is signed by somebody else in the same week, which is the
+    // whole point of a finals night: the room does not go home.
+    const left = sv.cast.filter(t => picked.indexOf(t) < 0)
+      .sort((a, b) => KP.potentialOverall(b) - KP.potentialOverall(a));
+    const pool = (st.rivals || []).filter(r => {
+      const sp = KP.rivalSpec(r);
+      return sp && sp.gender === st.company.gender;
+    });
+    left.slice(0, S.rivalTakes).forEach(t => {
+      if (!pool.length) return;
+      const r = U.pick(pool);
+      const sp = KP.rivalSpec(r);
+      if (r.trainees.length >= KP.rivals.rosterCap) r.trainees.shift();
+      delete t.votes;
+      r.trainees.push(KP.stripRivalPerson(t));
+      KP.log(sp.name + ' signed ' + t.name + ' off the same stage.', 'bad');
+    });
+
+    st.survival = null;
+    st.stats.shows++;
+    if (!picked.length) {
+      KP.log('The survival finals came and went without an offer from you.', 'bad');
+    }
+    return { ok: true, signed: picked.length };
+  };
 
   /* ================================ finance ================================
      A loan and an investor are the same record with opposite risk: the loan
@@ -1846,6 +2439,10 @@
     // rate would beat the player on every axis at once. The data constants stay
     // as the floor, which is what a small early ballot is scored on. None of it
     // is written back into the save.
+    const isUnitAct = (a) => {
+      const g = a.groupId ? st.groups.find(x => x.id === a.groupId) : null;
+      return !!(g && KP.isUnit(g));
+    };
     const ours = acts.filter(a => a.mine);
     const ourCp = ours.reduce((s, a) => s + a.cp, 0);
     const per = (total, floor) =>
@@ -1879,8 +2476,12 @@
     A.prizes.forEach(p => {
       let pool;
       if (p.pool === 'songs') pool = songs.slice().sort((a, b) => songBallot(b) - songBallot(a));
-      // Rookie eligibility is a one-shot window: the year you first charted.
-      else if (p.pool === 'rookies') pool = acts.filter(a => a.debutY === year)
+      // Rookie eligibility is a one-shot window: the year you first charted —
+      // and a sub-unit is not a rookie. Its members debuted years ago and the
+      // fandom it charts on was drawn out of an established act, so leaving them
+      // in would make Rookie of the Year a prize you re-win every year by
+      // splitting the same group a different way.
+      else if (p.pool === 'rookies') pool = acts.filter(a => a.debutY === year && !isUnitAct(a))
         .sort((a, b) => ballotScore(b, p.k) - ballotScore(a, p.k));
       else pool = acts.slice().sort((a, b) => ballotScore(b, p.k) - ballotScore(a, p.k));
       if (!pool.length) return;
@@ -2010,11 +2611,20 @@
       }
     },
     {
-      k: 'conflict', p: .06, need: st => st.groups.some(g => KP.memberOf(st, g).length >= 3),
+      k: 'conflict', p: .06, need: st => KP.mainGroups(st).some(g => KP.memberOf(st, g).length >= 3),
       run(st) {
-        const g = U.pick(st.groups.filter(x => KP.memberOf(st, x).length >= 3));
-        KP.memberOf(st, g).forEach(m => { m.morale = U.clamp(m.morale - U.rnd(6, 14), 0, 100); });
-        return { ic: '⚡', text: 'Tension inside ' + g.name + ' — morale dropped', kind: 'bad' };
+        const g = U.pick(KP.mainGroups(st).filter(x => KP.memberOf(st, x).length >= 3));
+        const members = KP.memberOf(st, g);
+        members.forEach(m => { m.morale = U.clamp(m.morale - U.rnd(6, 14), 0, 100); });
+        // Two of them, not all of them: an argument has two sides, and the pair
+        // it happened between is the pair that has to live with it afterwards.
+        const two = U.pickN(members, 2);
+        bumpBond(st, g, two[0].id, two[1].id, -U.rnd(KP.bonds.strain[0], KP.bonds.strain[1]));
+        return {
+          ic: '⚡',
+          text: two[0].name + ' and ' + two[1].name + ' fell out inside ' + g.name,
+          kind: 'bad'
+        };
       }
     },
     {
@@ -2032,39 +2642,16 @@
       run(st) {
         const t = U.pick(st.trainees.filter(x => x.morale < 28));
         if (U.chance(.35)) {
-          // They walk. Contracts don't hold people who stopped believing.
+          // They walk. Contracts don't hold people who stopped believing — and
+          // the departure goes through the one exit path, so a line-up that
+          // loses somebody redistributes its positions, prunes their bonds and
+          // takes the fandom hit here exactly as it does at the seven-year cliff.
           const wasIdol = !!t.groupId;
-          let disbanded = null;
-          if (wasIdol) {
-            const g = st.groups.find(x => x.id === t.groupId);
-            if (g) {
-              g.memberIds = g.memberIds.filter(id => id !== t.id);
-              // A group with nobody left cannot promote, chart or be scored.
-              if (!g.memberIds.length) {
-                g.active = null;
-                st.groups = st.groups.filter(x => x.id !== g.id);
-                // Pulling their row out of the published chart leaves a hole in
-                // the numbering, and the Chart tab prints r.rank straight out —
-                // so the ladder would read #5, #6, #8 with nothing to explain the
-                // missing rung. Everyone below the withdrawn song moves up one.
-                st.chart = (st.chart || []).filter(r => r.groupId !== g.id);
-                st.chart.forEach((r, i) => { r.rank = i + 1; });
-                // Their diary goes with them. The fees do not come back.
-                st.bookings = (st.bookings || []).filter(b => b.groupId !== g.id);
-                // ...and so does any story about them. A scandal left pointing at
-                // a group that no longer exists is a modal with nobody in it and
-                // a silence outcome nobody can be charged for.
-                if (st.scandal && st.scandal.gid === g.id) st.scandal = null;
-                if (st.fallout && st.fallout.gid === g.id) st.fallout = null;
-                disbanded = g.name;
-              }
-            }
-          }
+          const r = wasIdol ? E.leaveGroup(st, t, 'quit') : { ok: true };
           st.trainees = st.trainees.filter(x => x.id !== t.id);
-          st.company.rep = U.clamp(st.company.rep - (wasIdol ? 5 : 1), 0, 100);
-          if (disbanded) {
-            KP.log(disbanded + ' has disbanded — nobody is left in the group.', 'bad');
-            return { ic: '💔', text: disbanded + ' disbanded — the last member walked', kind: 'bad' };
+          if (!wasIdol) st.company.rep = U.clamp(st.company.rep - 1, 0, 100);
+          if (r.disbanded) {
+            return { ic: '💔', text: r.disbanded + ' disbanded — the last member walked', kind: 'bad' };
           }
           return { ic: '🚪', text: t.name + ' terminated their contract and left', kind: 'bad' };
         }
@@ -2144,6 +2731,12 @@
     //    gets the silence outcome exactly once rather than a modal that follows
     //    them forever.
     if (st.scandal) E.scandalRespond(st, 'silence');
+    // ...and the same rule for the other question the game asks and waits on. A
+    // finals night nobody answered signs nobody: the contestants do not sit in
+    // the studio until somebody remembers them, they are signed by whoever else
+    // was in the room. Resolved here rather than on a timer for exactly the
+    // reason the scandal is — one outcome, in the week it was asked.
+    if (st.survival && st.survival.ready) E.survivalSign(st, []);
 
     st.week++;
     if (st.week > KP.WEEKS_PER_YEAR) {
@@ -2177,12 +2770,21 @@
     // 2. training
     st.trainees.forEach(t => trainWeek(st, t));
 
-    // 2b. Mood Makers lift the room, not just themselves — the trait's own promise.
-    st.groups.forEach(g => {
+    // 2b. Mood Makers lift the room, not just themselves — the trait's own
+    //     promise. Main groups only: a unit is the same people, and running it
+    //     over both would pay the trait twice for one line-up.
+    KP.mainGroups(st).forEach(g => {
       const mates = KP.memberOf(st, g);
       const lift = mates.reduce((s, m) => s + traitAdd(m, 'teamMorale'), 0);
       if (lift > 0) mates.forEach(m => { m.morale = U.clamp(m.morale + lift, 0, 100); });
     });
+
+    // 2c. the room settles: bonds drift, a promotion cycle or a unit builds
+    //     them, an empty week grinds them down, and the chemistry pays the
+    //     people in it. Before the bookings resolve rather than after, so a
+    //     week's cast bonds on top of a settled number instead of being
+    //     immediately averaged back toward base.
+    E.bondWeek(st);
 
     // 3. market + chart
     tickMarket(st);
@@ -2247,6 +2849,16 @@
     // 6. events
     runEvents(st);
 
+    // 6b. the seven-year cliff. After the events on purpose: a person the
+    //     burnout event has just removed from the building is not also served
+    //     an expiry notice in the same week, and both go through E.leaveGroup so
+    //     the group they were in is left in one consistent shape either way.
+    E.contractWeek(st);
+
+    // 6c. the survival show: the votes accrue, and on the last week the finals
+    //     are called. Answering them is step 0's job next week.
+    E.survivalWeek(st);
+
     // 7. audition list refreshes on its own every 4 weeks — and somebody else
     //    gets the room's best hopeful on the way out, which is the point.
     if (KP.absWeek(st) - st.scoutRefreshedWeek >= 4) {
@@ -2305,7 +2917,13 @@
     return { ok: true };
   };
 
+  /* Re-runnable, and it has to be: this is called on every line-up change as
+     well as at the debut, and a member who is no longer the oldest in the room
+     would otherwise keep the Leader chip they were handed four years ago —
+     nothing below reassigns a position that is already set. Clearing first is
+     what makes a departure actually redistribute the room. */
   E.assignPositions = function (st, members) {
+    members.forEach(m => { m.position = null; });
     const by = (k) => members.slice().sort((a, b) => b.stats[k] - a.stats[k])[0];
     const taken = new Set();
     const give = (m, pos) => { if (m && !taken.has(m.id)) { m.position = pos; taken.add(m.id); } };
@@ -2323,6 +2941,12 @@
   E.debut = function (st, opts) {
     const members = opts.memberIds.map(id => st.trainees.find(t => t.id === id)).filter(Boolean);
     if (members.length < 3) return { ok: false, msg: 'A group needs at least 3 members.' };
+    // Reachable now that a line-up can change under an open wizard: the debut
+    // modal's list is one render stale, and stamping a second groupId on
+    // somebody would leave the first group holding a member it no longer has.
+    if (members.some(m => m.groupId)) {
+      return { ok: false, msg: 'Somebody in that line-up is already in a group.' };
+    }
     // The wizard's disabled state is one render stale — validate where it is authoritative.
     const name = String(opts.name || '').trim();
     if (!name) return { ok: false, msg: 'Your group needs a name.' };
@@ -2338,7 +2962,11 @@
       color: opts.color,
       fandom: opts.fandom,
       memberIds: members.map(m => m.id),
-      fans: Math.round(2200 + st.company.rep * 260 + E.groupScore(members, opts.concept) * 120),
+      // A name the country already knows debuts with the fandom it earned on
+      // television. This is what a survival show is actually bought for, and it
+      // is why the fame it hands out decays while they sit in the practice room.
+      fans: Math.round(2200 + st.company.rep * 260 + E.groupScore(members, opts.concept) * 120
+        + members.reduce((s, m) => s + (m.fame || 0), 0) * KP.survival.fameFans),
       momentum: 22,
       // The three numbers that say what kind of fandom this is, at the values
       // every modifier in KP.fandom is written as a deviation from: a group
@@ -2355,9 +2983,20 @@
       liveAbs: {},
       livesY: 0,
       ticketsY: 0,
+      bonds: {},
       debut: { y: st.year, w: st.week }
     };
-    members.forEach(m => { m.groupId = g.id; m.focus = 'dance'; });
+    // Seven years, from tonight. The clock is the group's, not the company's: a
+    // trainee is on a training agreement and has nothing to renegotiate, which
+    // is why the contract fields only exist on somebody who has debuted.
+    const term = KP.contracts.termYears * KP.WEEKS_PER_YEAR;
+    members.forEach(m => {
+      m.groupId = g.id;
+      m.focus = 'dance';
+      m.debutAbs = KP.absWeek(st);
+      m.contractAbs = m.debutAbs + term;
+    });
+    seedBonds(st, g, members, () => U.rnd(KP.bonds.start[0], KP.bonds.start[1]));
     E.assignPositions(st, members);
     st.groups.push(g);
     st.company.rep = U.clamp(st.company.rep + 3, 0, 100);

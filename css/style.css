@@ -358,11 +358,19 @@ kbd{
 
 .sel-idol{ cursor:pointer; transition:border-color .15s, background .15s; }
 .sel-idol.is-on{ border-color:var(--pink); background:rgba(255,46,134,.1); }
+/* Somebody already spoken for: a tile that reads as unavailable rather than as
+   one you keep clicking. Same treatment .opt.locked gets. */
+.sel-idol.locked{ opacity:.4; cursor:not-allowed; }
 
 /* ==========================================================================
    GROUPS
    ========================================================================== */
 .group-card{ border-top:2px solid var(--accent); }
+/* A unit is a group record, so it draws as a group card — inset and quieter, so
+   that a board of five cards still reads as two acts and their side projects
+   rather than as seven equal groups. */
+.group-card.is-unit{ border-top-style:dashed; margin-left:18px; background:rgba(255,255,255,.012); }
+.group-card.is-unit .group-name{ font-size:17px; }
 .group-head{ display:flex; gap:14px; align-items:flex-start; margin-bottom:14px; }
 .group-name{ font-family:var(--display); font-size:20px; letter-spacing:-.02em; }
 .group-kr{ font-family:var(--kr); font-size:12px; color:var(--accent); }

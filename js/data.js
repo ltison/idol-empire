@@ -864,6 +864,162 @@ KP.positions = ['Leader', 'Main Vocal', 'Main Dancer', 'Main Rapper', 'Visual', 
    the same thing and read completely differently in the feed. */
 KP.STATUS = ['ok', 'injured', 'hiatus'];
 
+/* ====================== relationships and chemistry =======================
+   A group used to be a bag of six stat blocks. These are the numbers that make
+   it a room: one bond per PAIR of members, moved by what the two of them
+   actually did together, and averaged into one chemistry reading that the
+   release maths, the variety desk and the renewal table all read.
+
+   Bonds are built by being in the same place — a booking's cast, a promotion
+   week, a run that peaked — and spent by strain: a conflict, a schedule that
+   left everybody empty, and above all a line-up that keeps changing. A member
+   added in year four starts at `newcomer` against everybody, which is why a
+   replacement costs months of quality rather than a fee.
+
+   Every chemistry modifier is written as a deviation from `mid`, on exactly the
+   terms KP.fandom's are and for the same reason: `mid` is where the simulation
+   SAYS a settled line-up sits, measured over ten in-game years, so a group that
+   nobody has done anything to reads ×1.00 and the whole system is a spread
+   between the agency that keeps its rooms together and the one that does not.
+   Re-tune it by measuring, never by reasoning. */
+KP.bonds = {
+  start: [42, 62],         // a pair that debuted together
+  newcomer: 24,            // ...and a pair where one of them joined later
+  base: 50,                // where a bond drifts with nothing happening
+  drift: .05,
+
+  together: .55,           // a week the two of them were on the same booking
+  promo: .30,              // ...or in the same promotion cycle
+  hit: 2.2,                // a promotion run that peaked top 3
+  flop: -1.0,              // ...and one that did not chart at all
+  tiredBelow: 25,          // both of them under this much stamina
+  tired: -.6,
+  strain: [4, 11],         // an internal conflict
+
+  /* Where a modifier is worth exactly 1.00, and deliberately NOT `base` above.
+     `base` is where a bond drifts with nothing happening to it; this is where a
+     line-up that is being PLAYED settles, measured over sixty games of ten
+     in-game years (57.0, spread 46–67; a random player parks at 44 and one that
+     books everything reaches 66). Anchored to `base` instead, every group that
+     does the ordinary thing carries a standing +2% on song quality — which is
+     Sprint 4's sentiment mistake in a different currency. Re-tune by measuring. */
+  mid: 57,
+  perfPer: 1 / 320,        // per point of chemistry above mid, on song quality
+  perfLo: .90, perfHi: 1.10,
+  edgePer: 1 / 260,        // ...on a variety room and a live house
+  edgeLo: .88, edgeHi: 1.12,
+  moralePer: 1 / 90,       // ...and the weekly morale a good room is worth
+  moraleCap: .8,
+
+  // What a departure does to the people left behind, and what it does to the
+  // ones who were closest to them. A line-up change is a fandom event.
+  leaveBond: -6,
+  leaveClose: 70           // a bond above this and the loss lands twice as hard
+};
+
+/* ============================== sub-units ================================
+   A unit is a GROUP RECORD with a parent — same releases, same chart, same
+   books, same schedule board — which is what makes two of the sprint's six
+   items one mechanic instead of two systems. What a unit does not get is its
+   own people: `t.groupId` still points at the parent, so a unit member is paid
+   once, trains once and runs out of stamina once.
+
+   The stamina is the whole cost. A unit is a second release pipeline off one
+   roster, and the roster is what it spends: a sub-unit promoting while the main
+   group is on a music show is the same four people on both stages.
+
+   Its fandom is a SUBSET of the parent's rather than a new one, which is why
+   `merchShare` exists — a passive weekly line keyed to fan count would
+   otherwise pay twice for one person holding one lightstick. Albums, tickets
+   and streams are not discounted, because those genuinely are second sales. */
+KP.unitKinds = [
+  { k: 'sub', name: 'Sub-unit', kr: '유닛', ic: '✧',
+    desc: 'Two or three of them, their own name, their own concept',
+    min: 2, max: 3, cost: 180e6, needReleases: 2, needFans: 60e3, share: [.30, .46] },
+  { k: 'solo', name: 'Solo debut', kr: '솔로', ic: '★',
+    desc: 'One name on the poster, and everything rides on it',
+    min: 1, max: 1, cost: 110e6, needReleases: 3, needFans: 90e3, share: [.16, .30] }
+];
+
+KP.units = {
+  maxPer: 2,               // units one parent can run at once
+  merchShare: .35,         // the overlap discount — see above
+  feedback: .40,           // the share of a unit's new fans that reaches the parent
+  loyalBack: .6,
+  bondUnit: .8,            // a week promoting as a unit, between its own members
+  disbandRep: 1.5
+};
+
+/* ========================= contracts and the cliff ========================
+   Seven years, because that is what a Korean idol contract is and because it is
+   long enough that the decision lands on a group the player has actually built.
+   The clock starts at DEBUT, not at signing: a trainee is on a training
+   agreement and has nothing to renegotiate.
+
+   The fee is what they are worth — their own ceiling, the fandom behind them,
+   the trophies on the shelf — and `mood` is the discount or the premium. Mood
+   is morale and chemistry, which is the whole reason bonds exist: a group that
+   was looked after re-signs for a third of what a group that was worked to the
+   bone will not re-sign for at any price. `refuseBelow` is that "at any price",
+   and it is deliberately reachable. */
+KP.contracts = {
+  termYears: 7,
+  renewYears: [3, 5],
+  windowWeeks: 52,         // how early the renewal decision opens
+
+  feeBase: 90e6,
+  feePerOverall: 7e6,      // × overall above 40
+  feePerFan: 700,          // × the group's fandom
+  feePerTrophy: 90e6,
+
+  moodMid: 58,             // morale × .55 + chemistry × .45, where the fee is flat
+  moodPer: .016,
+  moodLo: .55, moodHi: 2.6,
+  refuseBelow: 30,         // under this, no offer is a good offer
+
+  renewLoyal: 1.5,
+  renewSenti: 1.5,
+  renewMorale: 14,
+
+  // A contract that ran out is a line-up change with a headline attached.
+  leaveRep: 3,
+  leaveSenti: -5,
+  leaveFansPct: .05,
+  poachChance: .5          // ...and the odds they turn up in somebody else's building
+};
+
+/* ============================ the survival show ===========================
+   The audition list is six names a month and the agencies take whoever you
+   leave. A survival show is the other end of that: a broadcaster's budget, ten
+   weeks of your reputation on television, and a finals night where the public
+   has already decided who it likes.
+
+   The decision the show exists to create is the one on the last page: the
+   contestant the public voted for and the contestant the scouting report likes
+   are usually not the same person, and pre-debut fame (`t.fame`) is real money
+   — it walks into a debut as a fandom — but it evaporates while they sit in the
+   practice room learning to sing. */
+KP.survival = {
+  cost: 700e6,
+  weeks: 10,
+  cast: 12,
+  finalists: 6,
+  picks: 2,
+  standing: 22,            // a broadcaster does not commission an unknown
+  quality: [.30, .95],
+
+  repWeek: .35,            // being on television every week, whoever wins
+  sentiWeek: .4,
+  voteBase: [8, 30],
+  votePerWeek: .55,        // × how watchable they are (visual, charisma, variety)
+  voteNoise: 9,
+
+  fameOf: [18, 62],        // the fame band the finals hands out, best to worst
+  fameFans: 1500,          // fans a point of pre-debut fame is worth at debut
+  fameDecay: .982,         // ...and how fast it evaporates in the practice room
+  rivalTakes: 2            // finalists the agencies sign out of the room you left
+};
+
 /* ------------------------------ company setup ----------------------------- */
 KP.difficulties = {
   easy: { money: 3.0e9, rep: 12, label: 'Backed' },
@@ -877,6 +1033,7 @@ KP.costs = {
   facilityWeek: 3.0e6,    // per facility level
   staffWeek: 3.5e6,       // per staff level
   debutShowcase: 250e6,
+  lineupShowcase: 120e6,  // adding somebody to a line-up that already exists
   scoutRefresh: 20e6,
   bankruptcyFloor: -500e6,
   facilityUpgrade: 260e6, // × the current level, so Lv4→5 costs four times Lv1→2

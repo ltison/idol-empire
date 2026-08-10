@@ -81,13 +81,25 @@
     const injured = t.status === 'injured';
     const group = t.groupId ? st.groups.find(g => g.id === t.groupId) : null;
 
+    // Seven years from debut, and the last of them is a decision. The chip is on
+    // the person rather than only in the table because that is where the player
+    // is already looking when they wonder who is worth keeping.
+    const left = KP.contractLeft(st, t);
+    const contract = left == null ? '' : KP.inRenewWindow(st, t)
+      ? `<span class="chip hot" title="Renew them or they walk when the term ends">📄 ${left}w left</span>`
+      : `<span class="chip" title="Contract runs to the end of the term">📄 ${
+        (left / KP.WEEKS_PER_YEAR).toFixed(1)}y</span>`;
+    const fame = t.fame > 0
+      ? `<span class="chip cool" title="What the public already knows them for — it fades every week they are not on screen">📺 ${Math.round(t.fame)}</span>`
+      : '';
+
     let footer = '';
     if (mode === 'trainee') {
       footer = injured
         ? `<div class="chip hot">Injured · ${t.statusWeeks}w left</div>`
         : group
-          ? `<div class="row"><span class="chip cool">${U.esc(group.name)}</span><span class="chip">${U.esc(t.position || '')}</span></div>${focusGrid(t)}`
-          : focusGrid(t) + `<div class="row" style="margin-top:8px"><span class="spacer"></span>
+          ? `<div class="row"><span class="chip cool">${U.esc(group.name)}</span><span class="chip">${U.esc(t.position || '')}</span>${contract}${fame}</div>${focusGrid(t)}`
+          : focusGrid(t) + `<div class="row" style="margin-top:8px">${fame}<span class="spacer"></span>
               <button class="btn btn-sm btn-cut" data-act="release" data-id="${t.id}"
                 title="Tear up the contract — no refund">Release</button></div>`;
     } else if (mode === 'scout') {
@@ -395,6 +407,44 @@
     </div>`;
   }
 
+  /* The renewal table. Everybody inside the last year of their term, what they
+     are asking, and — the number the whole system exists for — what they think
+     of you. Nothing here is computed for display: the price and the mood are
+     the ones E.renewContract charges and judges. */
+  function contractsCard(st) {
+    const C = KP.contracts;
+    const due = KP.renewals(st);
+    if (!due.length) return '';
+    const rows = due.map(t => {
+      const g = st.groups.find(x => x.id === t.groupId);
+      const left = KP.contractLeft(st, t);
+      const mood = KP.renewMood(st, t);
+      const will = KP.willRenew(st, t);
+      const cost = KP.renewCost(st, t);
+      const poor = st.company.money < cost;
+      return `<div class="led-row">
+        <span class="led-label">${U.esc(t.name)}
+          <i>${U.esc(g ? g.name : '')} · ovr ${KP.overall(t)} · ${left} week${left === 1 ? '' : 's'} left ·
+            morale ${Math.round(t.morale)} and a room at ${Math.round(g ? KP.chemistry(st, g) : 50)} →
+            mood ${Math.round(mood)}</i></span>
+        ${will
+          ? `<button class="btn btn-sm ${poor ? '' : 'btn-primary'}" data-act="renew" data-id="${t.id}"
+              ${poor ? 'disabled' : ''}>Re-sign · ${U.money(cost)}</button>`
+          : `<b class="neg">Will not re-sign</b>`}
+      </div>`;
+    }).join('');
+    return `<div class="card" style="margin-bottom:20px;border-color:var(--hot)">
+      <div class="sec-head"><h2>Contracts</h2><span class="kr">재계약</span>
+        <p>${due.length} inside the final year of a ${C.termYears}-year term</p></div>
+      <div class="ledger">${rows}</div>
+      <p class="tiny muted" style="margin:12px 0 0">Seven years from debut, and the last of them is a
+        negotiation. What they are asking is what they are worth — their own ceiling, the fandom behind them,
+        the trophies on the shelf — multiplied by what they think of you. Below mood ${C.refuseBelow} there is no
+        number: a group that was worked into the ground walks out and signs somewhere else, and the week the
+        term ends it happens whether the office was watching or not.</p>
+    </div>`;
+  }
+
   function traineesTab(st) {
     const undebuted = st.trainees.filter(t => !t.groupId);
     const debuted = st.trainees.filter(t => t.groupId);
@@ -411,11 +461,61 @@
       return head + `<div class="empty"><b>Nobody in the building</b>Head to Scouting and sign your first trainee.</div>`;
     }
 
-    return head +
-      `<div class="grid g-3">${undebuted.map(t => idolCard(t, 'trainee')).join('')}</div>` +
+    return head + contractsCard(st) +
+      (undebuted.length ? `<div class="grid g-3">${undebuted.map(t => idolCard(t, 'trainee')).join('')}</div>` : '') +
       (debuted.length ? `<div class="sec-head" style="margin-top:28px"><h2>Debuted idols</h2><span class="kr">아이돌</span>
         <p>Still training between schedules</p></div>
         <div class="grid g-3">${debuted.map(t => idolCard(t, 'trainee')).join('')}</div>` : '');
+  }
+
+  /* The other end of the audition room: a broadcaster's budget, ten weeks of
+     television, and a finals night the public has already decided. While it runs
+     this is a vote board — which is the point, because the name at the top of it
+     is rarely the name at the top of the ceiling column. */
+  function survivalCard(st) {
+    const S = KP.survival;
+    const sv = st.survival;
+
+    if (!sv) {
+      const block = KP.engine.survivalBlock(st);
+      return `<div class="card" style="margin-bottom:20px">
+        <div class="sec-head"><h2>Survival show</h2><span class="kr">서바이벌</span>
+          <p>${S.weeks} weeks on air · ${S.cast} contestants · sign ${S.picks} of the ${S.finalists} finalists</p>
+          <span class="spacer"></span>
+          <button class="btn btn-primary" data-act="survival-start" ${block ? 'disabled' : ''}>
+            Commission · ${U.money(S.cost)}</button></div>
+        <p class="tiny ${block ? 'neg' : 'muted'}" style="margin:-6px 0 0">${block ? U.esc(block) + ' ' : ''}An
+          audition round is six names and whoever you leave is signed by somebody else. A season is the other end
+          of that: a cast the country watches for ten weeks, reputation and public mood every week it is on, and a
+          finals night where the two contestants worth signing are the one the public voted for and the one the
+          scouting report likes. They are almost never the same person, and you get ${S.picks}.</p>
+      </div>`;
+    }
+
+    const ranked = KP.survivalRanked(st);
+    const top = ranked[0] ? ranked[0].votes : 1;
+    const rows = ranked.map((t, i) => `<div class="led-row">
+      <span class="led-label">${i + 1}. ${U.esc(t.name)}
+        <i>${t.age}y · ovr ${KP.overall(t)} · ceiling ${KP.potentialOverall(t)} ·
+          screen ${Math.round(KP.screenPresence(t))}</i></span>
+      <div class="bar thin ${i === 0 ? 'life' : 'calm'}" style="max-width:120px">
+        <u style="width:${U.clamp(t.votes / (top || 1) * 100, 2, 100).toFixed(0)}%"></u></div>
+      <b class="mono">${U.num(Math.round(t.votes))}</b>
+    </div>`).join('');
+
+    return `<div class="card" style="margin-bottom:20px;border-color:var(--cool)">
+      <div class="sec-head"><h2>Survival show</h2><span class="kr">서바이벌</span>
+        <p>${sv.ready ? 'The finals are in' : KP.survivalLeft(st) + ' weeks to the finals'} ·
+          public vote</p>
+        <span class="spacer"></span>
+        ${sv.ready ? `<button class="btn btn-primary" data-act="open-finals">Finals night</button>` : ''}</div>
+      <div class="ledger">${rows}</div>
+      <p class="tiny ${sv.ready ? 'neg' : 'muted'}" style="margin:12px 0 0">${sv.ready
+        ? 'Sign up to ' + S.picks + ' of them before the week turns. Whoever you leave in that room is signed by '
+          + 'somebody else in the same week — and if the week turns without an offer, all of them are.'
+        : 'The public is voting on what it can see: visuals, presence and whether they are entertaining. '
+          + 'Reputation and public mood go up every week it is on air, whoever wins.'}</p>
+    </div>`;
   }
 
   function scoutTab(st) {
@@ -425,50 +525,68 @@
       <span class="spacer"></span>
       <button class="btn" data-act="refresh-scouts">New round · ${U.money(KP.costs.scoutRefresh)}</button>
     </div>`;
-    if (!st.scoutPool.length) return head + `<div class="empty"><b>Room's empty</b>Call a new audition round.</div>`;
-    return head + `<div class="grid g-3">${st.scoutPool.map(t => idolCard(t, 'scout')).join('')}</div>`;
+    if (!st.scoutPool.length) {
+      return head + survivalCard(st) + `<div class="empty"><b>Room's empty</b>Call a new audition round.</div>`;
+    }
+    return head + survivalCard(st) +
+      `<div class="grid g-3">${st.scoutPool.map(t => idolCard(t, 'scout')).join('')}</div>`;
   }
 
-  function groupsTab(st) {
-    const head = `<div class="sec-head">
-      <h2>Groups</h2><span class="kr">그룹</span>
-      <p>${st.groups.length} active</p>
-      <span class="spacer"></span>
-      <button class="btn btn-primary" data-act="open-debut">Form a group</button>
-    </div>`;
+  /* Chemistry reads as what it is worth, not as a raw average: a settled room is
+     ×1.00 and everything the player can see is the spread away from it. */
+  function chemChip(st, g) {
+    const c = KP.chemistry(st, g);
+    const p = KP.chemPerf(st, g);
+    return `<span class="chip ${p > 1.02 ? 'cool' : p < .98 ? 'hot' : ''}"
+      title="Average bond across the line-up. Song quality ${mul(p)}.">♥ ${Math.round(c)}</span>`;
+  }
 
-    if (!st.groups.length) {
-      return head + `<div class="empty"><b>No group yet</b>Three trainees and a showcase budget is all it takes.</div>`;
-    }
+  function groupCard(st, g) {
+    const members = KP.memberOf(st, g);
+    const unit = KP.isUnit(g);
+    const spec = KP.unitSpec(g);
+    const parent = unit ? KP.parentOf(st, g) : null;
+    const units = unit ? [] : KP.unitsOf(st, g.id);
+    // A renewal is a deadline, so the card carries it rather than making the
+    // player go and look: whoever is closest to their cliff, and how close.
+    const due = unit ? [] : members.filter(m => KP.inRenewWindow(st, m))
+      .sort((a, b) => KP.contractLeft(st, a) - KP.contractLeft(st, b));
 
-    const cards = st.groups.map(g => {
-      const members = KP.memberOf(st, g);
-      const strip = members.map(m => `<div class="member">
-        ${avatar(m)}<em>${U.esc(m.name.split(' ')[0])}</em><i>${U.esc((m.position || '').replace('Main ', ''))}</i>
-      </div>`).join('');
+    const strip = members.map(m => `<div class="member">
+      ${avatar(m)}<em>${U.esc(m.name.split(' ')[0])}</em><i>${unit ? '' :
+        U.esc((m.position || '').replace('Main ', ''))}</i>
+    </div>`).join('');
 
-      const disc = g.releases.length ? `<div class="disc">${g.releases.slice(0, 5).map(r =>
-        `<div class="disc-row">
+    const disc = g.releases.length ? `<div class="disc">${g.releases.slice(0, 5).map(r =>
+      `<div class="disc-row">
           <span class="pk ${r.peak === 1 ? 'gold' : ''}">#${r.peak}</span>
           <span>${U.esc(r.title)}</span>
           <span class="mono tiny muted">${U.num(r.sales)} sold</span>
           <span class="mono tiny ${r.wins ? 'gold' : 'muted'}">${r.wins}🏆</span>
         </div>`).join('')}</div>` : `<p class="tiny muted">No releases yet.</p>`;
 
-      return `<article class="card group-card" style="--accent:${g.color}">
+    return `<article class="card group-card ${unit ? 'is-unit' : ''}" style="--accent:${g.color}">
         <div class="group-head">
           <div>
             <div class="group-name">${U.esc(g.name)}</div>
-            <div class="group-kr">${g.kr ? U.esc(g.kr) + ' · ' : ''}${U.esc(KP.concept(g.concept).name)}</div>
+            <div class="group-kr">${unit && spec
+        ? U.esc(spec.name) + ' · ' + U.esc(parent ? parent.name : '')
+        : (g.kr ? U.esc(g.kr) + ' · ' : '') + U.esc(KP.concept(g.concept).name)}</div>
             <div class="idol-meta">Debut Y${g.debut.y} W${g.debut.w} · fandom ${U.esc(g.fandom)}</div>
           </div>
           <span class="spacer"></span>
+          ${chemChip(st, g)}
           ${g.active ? `<span class="chip hot">Promoting</span>` : `<span class="chip">Resting</span>`}
         </div>
 
         ${(g.trophies || []).length ? `<div class="row" style="margin-bottom:10px">${g.trophies.slice(0, 6).map(t =>
-        `<span class="chip win" title="Year ${t.y} · ${U.esc(t.name)}">${U.esc(t.ic)} Y${t.y}</span>`).join('')}
+          `<span class="chip win" title="Year ${t.y} · ${U.esc(t.name)}">${U.esc(t.ic)} Y${t.y}</span>`).join('')}
         ${g.trophies.length > 6 ? `<span class="tiny muted">+${g.trophies.length - 6} more</span>` : ''}</div>` : ''}
+
+        ${due.length ? `<div class="row" style="margin-bottom:10px">
+          <span class="chip hot" title="Seven years from debut. Renew them or they walk.">📄 ${U.esc(due[0].name)}
+            · ${KP.contractLeft(st, due[0])}w left${due.length > 1 ? ' (+' + (due.length - 1) + ')' : ''}</span>
+        </div>` : ''}
 
         <div class="member-strip">${strip}</div>
 
@@ -492,10 +610,35 @@
             ${g.releases.length ? 'Plan comeback' : 'Plan debut single'}
           </button>
           <button class="btn" data-act="open-booking" data-gid="${g.id}" data-abs="${KP.absWeek(st) + 1}">Book a schedule</button>
+          ${unit
+        ? `<button class="btn btn-cut" data-act="unit-disband" data-id="${g.id}"
+              title="Wrap the unit up — its members go back to the group full time">Wrap up</button>`
+        : `<button class="btn" data-act="open-lineup" data-id="${g.id}">Line-up</button>
+             <button class="btn" data-act="open-unit" data-id="${g.id}"
+               ${units.length >= KP.units.maxPer ? 'disabled' : ''}>Form a unit</button>`}
           ${g.active ? `<span class="tiny muted">Promotions end in ${g.active.promoWeeks - g.active.week} weeks</span>` : ''}
         </div>
       </article>`;
-    }).join('');
+  }
+
+  function groupsTab(st) {
+    const mains = KP.mainGroups(st);
+    const units = st.groups.length - mains.length;
+    const head = `<div class="sec-head">
+      <h2>Groups</h2><span class="kr">그룹</span>
+      <p>${mains.length} active${units ? ' · ' + units + ' unit' + (units === 1 ? '' : 's') : ''}</p>
+      <span class="spacer"></span>
+      <button class="btn btn-primary" data-act="open-debut">Form a group</button>
+    </div>`;
+
+    if (!st.groups.length) {
+      return head + `<div class="empty"><b>No group yet</b>Three trainees and a showcase budget is all it takes.</div>`;
+    }
+
+    // A unit is drawn immediately after the group it came out of, because that
+    // is what it is: the same people, and the same stamina, under a second name.
+    const cards = mains.map(g =>
+      [groupCard(st, g)].concat(KP.unitsOf(st, g.id).map(u => groupCard(st, u))).join('')).join('');
 
     return head + `<div class="grid g-2">${cards}</div>`;
   }
@@ -1021,8 +1164,14 @@
     $('#ui-rep').textContent = Math.round(st.company.rep);
     $('#ui-fans').textContent = U.num(KP.totalFans(st));
 
-    $('#badge-trainees').textContent = st.trainees.filter(t => !t.groupId).length || '';
-    $('#badge-scout').textContent = st.scoutPool.length || '';
+    // A renewal outranks a head count: one is a number the player already knows
+    // and the other is a deadline that ends a career if it is missed.
+    const due = KP.renewals(st).length;
+    $('#badge-trainees').textContent = due ? '!' + due : (st.trainees.filter(t => !t.groupId).length || '');
+    // Same rule on Scouting: a finals night is a decision with one week on it.
+    $('#badge-scout').textContent = st.survival && st.survival.ready ? '!'
+      : KP.survivalRunning(st) ? String(KP.survivalLeft(st))
+        : (st.scoutPool.length || '');
     $('#badge-groups').textContent = st.groups.length || '';
     $('#badge-sched').textContent = st.bookings.length || '';
     // The rail is where a wall is worth noticing: how many announced rival
@@ -1255,6 +1404,9 @@
         loyalty ${Math.round(KP.loyalOf(g))} and ${Math.round(KP.intlOf(g) * 100)}% overseas (×${pv.mods.sales.toFixed(2)}),
         and the public is currently worth ×${pv.mods.hype.toFixed(2)} on hype${pv.mods.hype < .99
         ? ' — a cold room is a smaller opening than the same song deserves.' : '.'}</p>
+      <p class="tiny ${pv.chem < .99 ? 'neg' : 'muted'}" style="margin:8px 2px 0">The room is at
+        <b>${Math.round(KP.chemistry(st, g))}</b>, worth ×${pv.chem.toFixed(2)} on song quality${pv.chem < .99
+        ? ' — the one number in this planner you cannot buy this week.' : '.'}</p>
       <p class="tiny muted" style="margin:8px 2px 0">Releasing into <b>${U.esc(pv.season.name)}</b> · ${U.esc(pv.season.kr)} —
         rival opening points ×${pv.season.field.toFixed(2)}, streaming revenue ×${pv.season.audience.toFixed(2)}.
         ${pv.season.field > 1
@@ -1632,6 +1784,266 @@
           you are told what each answer is worth, never which half applies.</span>
         <span class="spacer"></span>
         <button class="btn" data-act="modal-close">Decide later</button>
+      </div>`);
+  };
+
+  /* ------------------------------- the line-up -----------------------------
+     Every pair in the room, weakest first, and the two ways a line-up changes.
+     The pair list is the whole point: chemistry is an average, and an average
+     never tells you which two people are the problem. */
+
+  ui.openLineup = function (gid) {
+    ui.lineup = gid;
+    ui.drawLineup();
+  };
+
+  ui.drawLineup = function () {
+    const st = KP.state;
+    const g = st.groups.find(x => x.id === ui.lineup);
+    if (!g || KP.isUnit(g)) return ui.closeModal();
+    const B = KP.bonds;
+    const members = KP.memberOf(st, g);
+    const free = st.trainees.filter(t => !t.groupId);
+    const chem = KP.chemistry(st, g);
+    const cost = KP.costs.lineupShowcase;
+
+    const roster = members.map(m => {
+      const left = KP.contractLeft(st, m);
+      return `<div class="led-row">
+        <span class="led-label">${U.esc(m.name)}
+          <i>${U.esc(m.position || '')} · ovr ${KP.overall(m)} · morale ${Math.round(m.morale)}${
+            left == null ? '' : ' · ' + (left / KP.WEEKS_PER_YEAR).toFixed(1) + 'y on contract'}</i></span>
+        <button class="btn btn-sm btn-cut" data-act="graduate" data-id="${m.id}"
+          ${members.length <= 1 ? 'disabled' : ''}
+          title="They leave the line-up and go back to the trainee room">Graduate</button>
+      </div>`;
+    }).join('');
+
+    const pairs = KP.bondPairs(st, g).map(p => `<div class="trend">
+      <span class="nm">${U.esc(p.a.name.split(' ')[0])} &amp; ${U.esc(p.b.name.split(' ')[0])}</span>
+      <i>${Math.round(p.v)}</i>
+      <div class="bar ${p.v >= 65 ? 'life' : p.v < 35 ? 'warm' : 'calm'}">
+        <u style="width:${U.clamp(p.v, 0, 100).toFixed(0)}%"></u></div>
+    </div>`).join('');
+
+    const adds = free.length ? free.map(t => `<button class="opt"
+        data-act="join-group" data-gid="${g.id}" data-id="${t.id}"
+        ${st.company.money < cost || members.length >= 7 ? 'disabled' : ''}>
+      <div><b>${U.esc(t.name)}</b><small>${t.age}y · ovr ${KP.overall(t)} · ceiling ${KP.potentialOverall(t)}${
+        t.fame > 0 ? ' · ' + Math.round(t.fame) + ' points of a name the public knows' : ''}</small></div>
+      <span class="q">joins at ${B.newcomer}</span>
+      <span class="c">${U.money(cost)}</span>
+    </button>`).join('')
+      : `<p class="tiny muted">Nobody free in the building.</p>`;
+
+    ui.modal(`
+      <div class="modal-head">
+        <div><div class="kr">라인업</div><h3>${U.esc(g.name)} — line-up</h3></div>
+        <button class="modal-close" data-act="modal-close">✕</button>
+      </div>
+
+      <div class="est">
+        <div><b>${Math.round(chem)}</b><span>Chemistry</span></div>
+        <div><b class="${mulTone(KP.chemPerf(st, g))}">${mul(KP.chemPerf(st, g))}</b><span>Song quality</span></div>
+        <div><b class="${mulTone(KP.chemEdge(st, g))}">${mul(KP.chemEdge(st, g))}</b><span>Variety room</span></div>
+        <div><b>${members.length}</b><span>Members</span></div>
+      </div>
+
+      <div class="wiz-step">
+        <span class="eyebrow">Who is in it</span>
+        <div class="ledger">${roster}</div>
+      </div>
+
+      ${members.length > 1 ? `<div class="wiz-step">
+        <span class="eyebrow">Who gets on with whom — weakest pair first</span>
+        ${pairs}
+      </div>` : ''}
+
+      <div class="wiz-step">
+        <span class="eyebrow">Bring somebody in</span>
+        <div class="opt-list">${adds}</div>
+      </div>
+
+      <div class="modal-foot">
+        <span class="tiny muted">Bonds are built by being in the same room — a booking's cast, a promotion
+          cycle, a run that peaked — and spent by strain and by weeks where everybody was empty. A member
+          brought in later starts at ${B.newcomer} against everybody, which is what a replacement really
+          costs. A graduation costs the fandom, the public mood and the reputation of the agency, and the
+          positions redistribute the same week.</span>
+      </div>`);
+  };
+
+  /* -------------------------------- the unit -------------------------------
+     The debut wizard, shorter: the line-up can only come out of one group and
+     the numbers it debuts on are drawn out of that group's fandom. */
+
+  ui.openUnit = function (gid) {
+    const st = KP.state;
+    const g = st.groups.find(x => x.id === gid);
+    if (!g || KP.isUnit(g)) return;
+    ui.unit = {
+      gid,
+      kind: 'sub',
+      picked: [],
+      concept: g.concept,
+      color: g.color,
+      name: U.pick(KP.groupNameParts.a) + ':' + U.pick(KP.groupNameParts.b),
+      kr: ''
+    };
+    ui.drawUnit();
+  };
+
+  ui.drawUnit = function () {
+    const st = KP.state;
+    const w = ui.unit;
+    const parent = st.groups.find(x => x.id === w.gid);
+    if (!parent) return ui.closeModal();
+    const spec = KP.unitKind(w.kind);
+    const pool = KP.memberOf(st, parent);
+    const members = w.picked.map(id => st.trainees.find(t => t.id === id)).filter(Boolean);
+    const block = KP.engine.unitBlock(st, parent, w.kind, w.picked);
+    const nameTaken = st.groups.some(g => g.name === w.name.trim());
+    const canGo = !block && w.name.trim().length > 0 && !nameTaken;
+
+    const kinds = KP.unitKinds.map(u => {
+      const gate = KP.engine.unitBlock(st, parent, u.k, new Array(u.min).fill('?'));
+      // Only the gates that are about the KIND, never the ones about the picks:
+      // this row is choosing what to form, not who is in it.
+      const hard = gate && /releases|fans|already running|showcase/.test(gate) ? gate : null;
+      return `<button class="opt ${w.kind === u.k ? 'is-on' : ''} ${hard ? 'locked' : ''}"
+          ${hard ? 'disabled' : ''} data-act="unit-kind" data-key="${u.k}">
+        <div><b>${U.esc(u.ic)} ${U.esc(u.name)}
+          <span style="font-family:var(--kr);font-weight:400;color:var(--lilac)">${U.esc(u.kr)}</span></b>
+          <small>${U.esc(u.desc)}${hard ? ' · ' + U.esc(hard) : ''}</small></div>
+        <span class="q">${u.min === u.max ? u.min : u.min + '–' + u.max} member${u.max === 1 ? '' : 's'} ·
+          ${Math.round(u.share[0] * 100)}–${Math.round(u.share[1] * 100)}% of the fandom</span>
+        <span class="c">${U.money(u.cost)}</span>
+      </button>`;
+    }).join('');
+
+    const picks = pool.map(t => {
+      const busy = KP.inAUnit(st, t.id) && w.picked.indexOf(t.id) < 0;
+      return `<div class="card sel-idol ${w.picked.indexOf(t.id) >= 0 ? 'is-on' : ''} ${busy ? 'locked' : ''}"
+          ${busy ? '' : `data-act="unit-pick" data-id="${t.id}"`} style="padding:12px">
+        <div class="idol-top" style="pointer-events:none">
+          ${avatar(t)}
+          <div><div class="idol-name" style="font-size:13px">${U.esc(t.name)}</div>
+          <div class="idol-meta">${busy ? 'already in a unit' : 'ovr ' + KP.overall(t)}</div></div>
+        </div>
+      </div>`;
+    }).join('');
+
+    const concepts = KP.concepts.map(c => `<button class="opt ${w.concept === c.k ? 'is-on' : ''}"
+        data-act="unit-concept" data-key="${c.k}">
+        <div><b>${c.name} <span style="font-family:var(--kr);font-weight:400;color:var(--lilac)">${c.kr}</span></b>
+        <small>${Object.keys(c.w).sort((a, b) => c.w[b] - c.w[a]).slice(0, 3).map(k => KP.STATS.find(s => s.k === k).label).join(' · ')}</small></div>
+        <span class="q">trend ${Math.round(st.trends[c.k])}</span>
+        <span class="c">${members.length ? Math.round(KP.engine.groupScore(members, c.k)) : '—'}</span>
+      </button>`).join('');
+
+    ui.modal(`
+      <div class="modal-head">
+        <div><div class="kr">유닛</div><h3>A unit out of ${U.esc(parent.name)}</h3></div>
+        <button class="modal-close" data-act="modal-close">✕</button>
+      </div>
+
+      <div class="wiz-step">
+        <span class="eyebrow">1 — What kind</span>
+        <div class="opt-list">${kinds}</div>
+      </div>
+
+      <div class="wiz-step">
+        <span class="eyebrow">2 — Who (${members.length} of ${spec ? (spec.min === spec.max ? spec.min
+          : spec.min + '–' + spec.max) : '?'})</span>
+        <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">${picks}</div>
+      </div>
+
+      <div class="wiz-step">
+        <span class="eyebrow">3 — Concept</span>
+        <div class="opt-list">${concepts}</div>
+      </div>
+
+      <div class="wiz-step">
+        <span class="eyebrow">4 — Identity</span>
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <label><span class="tiny muted">Unit name</span>
+            <input class="text-in" data-act="unit-name" value="${U.esc(w.name)}" maxlength="18"></label>
+          <div class="row" style="align-items:flex-end">
+            <div class="swatches">${KP.groupColors.map(c =>
+              `<button class="swatch ${w.color === c ? 'is-on' : ''}" style="background:${c}"
+                data-act="unit-color" data-key="${c}"></button>`).join('')}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="est">
+        <div><b>${members.length ? Math.round(KP.engine.groupScore(members, w.concept)) : '—'}</b><span>Concept fit</span></div>
+        <div><b>${spec ? U.num(Math.round(parent.fans * spec.share[0])) + '–'
+          + U.num(Math.round(parent.fans * spec.share[1])) : '—'}</b><span>Starting fandom</span></div>
+        <div><b>${spec ? U.money(spec.cost) : '—'}</b><span>Showcase cost</span></div>
+      </div>
+
+      <div class="modal-foot">
+        <span class="tiny ${block || nameTaken ? 'neg' : 'muted'}">${nameTaken
+          ? 'You already have an act called that.'
+          : block ? U.esc(block)
+            : 'Its fandom is drawn out of ' + U.esc(parent.name) + '’s rather than added to it, so the goods '
+              + 'line is discounted to ' + Math.round(KP.units.merchShare * 100) + '%. What a unit really costs is '
+              + 'the stamina of the same people: they are on both diaries.'}</span>
+        <span class="spacer"></span>
+        <button class="btn" data-act="modal-close">Cancel</button>
+        <button class="btn btn-primary" data-act="unit-form" ${canGo ? '' : 'disabled'}>Debut the unit</button>
+      </div>`);
+  };
+
+  /* ------------------------------ finals night -----------------------------
+     Ranked by the public vote, and the ceiling column is right next to it so the
+     disagreement is on one screen. Everything not signed here is signed by
+     somebody else this week, including if the answer is nothing. */
+
+  ui.openFinals = function () {
+    ui.finals = ui.finals && ui.finals.picked ? ui.finals : { picked: [] };
+    ui.drawFinals();
+  };
+
+  ui.drawFinals = function () {
+    const st = KP.state;
+    const S = KP.survival;
+    const sv = st.survival;
+    if (!sv || !sv.ready) return ui.closeModal();
+    const picked = ui.finals.picked;
+    const ranked = KP.survivalRanked(st);
+
+    const cards = ranked.map((t, i) => `<div class="card sel-idol ${picked.indexOf(t.id) >= 0 ? 'is-on' : ''}"
+        data-act="finals-pick" data-id="${t.id}" style="padding:12px">
+      <div class="idol-top" style="pointer-events:none">
+        ${avatar(t)}
+        <div><div class="idol-name" style="font-size:13px">#${i + 1} ${U.esc(t.name)}</div>
+        <div class="idol-meta">${U.num(Math.round(t.votes))} votes · ovr ${KP.overall(t)} ·
+          ceiling ${KP.potentialOverall(t)}</div>
+        <div class="idol-meta">📺 ${Math.round(t.fame)} of a name the public knows</div></div>
+      </div>
+    </div>`).join('');
+
+    ui.modal(`
+      <div class="modal-head">
+        <div><div class="kr">파이널</div><h3>Finals night</h3></div>
+        <button class="modal-close" data-act="modal-close">✕</button>
+      </div>
+      <p class="muted" style="margin:0 0 14px">The public has voted. You may sign ${S.picks} of them, and the
+        offer is already paid for — what is left of this list is signed by the agencies before the week is out.</p>
+      <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr))">${cards}</div>
+      <div class="est">
+        <div><b>${picked.length} / ${S.picks}</b><span>Signed tonight</span></div>
+        <div><b>${U.num(Math.round(ranked[0] ? ranked[0].votes : 0))}</b><span>Winning vote</span></div>
+        <div><b>${S.rivalTakes}</b><span>The agencies take</span></div>
+      </div>
+      <div class="modal-foot">
+        <span class="tiny muted">Fame is a fandom at the debut showcase and it evaporates while they learn to
+          sing — ${Math.round((1 - KP.survival.fameDecay) * 100 * 52)}% of it a year in the practice room.</span>
+        <span class="spacer"></span>
+        <button class="btn btn-primary" data-act="finals-confirm">${picked.length
+          ? 'Sign ' + picked.length : 'Sign nobody'}</button>
       </div>`);
   };
 

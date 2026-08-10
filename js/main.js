@@ -123,6 +123,11 @@
     const awardYear = KP.engine.claimAwards(st);
     // Saved before it is shown, so a closed tab cannot make it happen twice.
     if (awardYear != null) { KP.save(); return ui.openAwards(awardYear); }
+    // A finals night is the second thing in the game that asks a question and
+    // waits, so it is ranked beside the scandal and above the weekly toasts.
+    // Being outranked loses nothing: both keep their own panel and their own
+    // week, and step 0 answers whichever one the player walked away from.
+    if (st.survival && st.survival.ready) return ui.openFinals();
     if (st.scandal) return ui.openScandal();
     recap.slice(0, 3).forEach((r, i) =>
       setTimeout(() => ui.toast(r.ic + '  ' + r.text, r.kind), i * 220));
@@ -137,8 +142,10 @@
     if (y == null) {
       // A run reopened in the middle of a story still owes the player the
       // decision — and still has the week it broke in to make it, because the
-      // silence outcome is applied by the tick and not by the clock.
-      if (st.scandal) ui.openScandal();
+      // silence outcome is applied by the tick and not by the clock. Same for a
+      // finals night the tab was closed on.
+      if (st.survival && st.survival.ready) ui.openFinals();
+      else if (st.scandal) ui.openScandal();
       return;
     }
     KP.save();
@@ -205,6 +212,100 @@
       ui.render();
       KP.save();                    // signed money must survive a closed tab
       ui.toast(U.money(r.net) + ' advance received.', 'big');
+    },
+
+    /* ---- people: line-ups, units, contracts, the survival show ---- */
+    'open-lineup'(d) { ui.openLineup(d.id); },
+    graduate(d) {
+      const st = KP.state;
+      const t = st.trainees.find(x => x.id === d.id);
+      const r = KP.engine.graduate(st, d.id);
+      if (!r.ok) return ui.toast(r.msg, 'bad');
+      // The modal is redrawn rather than closed: a line-up change is usually
+      // more than one change, and the pair list underneath it has just moved.
+      if (r.disbanded) ui.closeModal(); else ui.drawLineup();
+      ui.render();
+      KP.save();
+      ui.toast(r.disbanded
+        ? r.disbanded + ' has disbanded.'
+        : (t ? t.name : 'They') + ' left the line-up · ' + U.num(r.lost || 0) + ' fans gone.', 'bad');
+    },
+    'join-group'(d) {
+      const r = KP.engine.joinGroup(KP.state, d.gid, d.id);
+      if (!r.ok) return ui.toast(r.msg, 'bad');
+      ui.drawLineup();
+      ui.render();
+      KP.save();
+      ui.toast('Introduced — the room does not know them yet.', '');
+    },
+
+    'open-unit'(d) { ui.openUnit(d.id); },
+    'unit-kind'(d) { syncUnit(); ui.unit.kind = d.key; ui.unit.picked = []; ui.drawUnit(); },
+    'unit-pick'(d) {
+      syncUnit();
+      const w = ui.unit, spec = KP.unitKind(w.kind);
+      const i = w.picked.indexOf(d.id);
+      if (i >= 0) w.picked.splice(i, 1);
+      else if (!spec || w.picked.length < spec.max) w.picked.push(d.id);
+      else return ui.toast(spec.name + 's are ' + spec.max + ' at most.', 'bad');
+      ui.drawUnit();
+    },
+    'unit-concept'(d) { syncUnit(); ui.unit.concept = d.key; ui.drawUnit(); },
+    'unit-color'(d) { syncUnit(); ui.unit.color = d.key; ui.drawUnit(); },
+    'unit-form'() {
+      syncUnit();
+      const w = ui.unit;
+      const r = KP.engine.formUnit(KP.state, {
+        parentId: w.gid, kind: w.kind, memberIds: w.picked,
+        name: w.name.trim(), kr: w.kr, concept: w.concept, color: w.color
+      });
+      if (!r.ok) return ui.toast(r.msg, 'bad');
+      ui.closeModal();
+      ui.tab = 'groups';
+      ui.render();
+      KP.save();
+      ui.toast('✧ ' + r.group.name + ' has debuted.', 'big');
+    },
+    'unit-disband'(d) {
+      const r = KP.engine.disbandUnit(KP.state, d.id);
+      if (!r.ok) return ui.toast(r.msg, 'bad');
+      ui.render();
+      KP.save();
+      ui.toast(r.name + ' has wrapped up.', '');
+    },
+
+    renew(d) {
+      const r = KP.engine.renewContract(KP.state, d.id);
+      if (!r.ok) return ui.toast(r.msg, 'bad');
+      ui.render();
+      KP.save();                    // a signature must survive a closed tab
+      ui.toast('Re-signed for ' + r.years + ' years · ' + U.money(r.cost) + '.', 'good');
+    },
+
+    'survival-start'() {
+      const r = KP.engine.startSurvival(KP.state);
+      if (!r.ok) return ui.toast(r.msg, 'bad');
+      ui.render();
+      KP.save();
+      ui.toast('📺 The season is commissioned.', 'big');
+    },
+    'open-finals'() { ui.openFinals(); },
+    'finals-pick'(d) {
+      const p = ui.finals.picked, i = p.indexOf(d.id);
+      if (i >= 0) p.splice(i, 1);
+      else if (p.length < KP.survival.picks) p.push(d.id);
+      else return ui.toast('You may sign ' + KP.survival.picks + ' of them.', 'bad');
+      ui.drawFinals();
+    },
+    'finals-confirm'() {
+      const r = KP.engine.survivalSign(KP.state, ui.finals.picked);
+      if (!r.ok) return ui.toast(r.msg, 'bad');
+      ui.finals = { picked: [] };
+      ui.closeModal();
+      ui.render();
+      KP.save();                    // a signature must survive a closed tab
+      ui.toast(r.signed ? 'Signed ' + r.signed + ' off the finals stage.'
+        : 'The agencies took the room.', r.signed ? 'good' : 'bad');
     },
 
     'scout-rival'(d) {
@@ -330,6 +431,10 @@
   function syncPlan() {
     const t = document.querySelector('[data-act="plan-title"]');
     if (t) ui.plan.title = t.value;
+  }
+  function syncUnit() {
+    const n = document.querySelector('[data-act="unit-name"]');
+    if (n) ui.unit.name = n.value;
   }
 
   document.addEventListener('click', (e) => {

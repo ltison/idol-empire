@@ -72,12 +72,13 @@ first NaN ships.
 
 `KP.engine.nextWeek()` is the heart of the game and runs eight numbered steps in order,
 plus seven lettered ones wedged inside steps 3, 4 and 5, and a step 0 above all of them:
-**0 an unanswered scandal is answered with silence** → trends drift → training → market
-tick → **3b booked schedules resolve** → **3c the rival agencies act** → chart build →
-**3d the yearbook accrues** → group promo/decay → **4b rival groups read the chart** →
-**4c the fandom settles and then pays** → books (`weeklyBurn` − `weeklyMisc`) → **5b debt
-service** → **5c platform deals** → events → audition refresh (**and a rival poaches on
-the way out**) → fail state, then autosaves. An unnumbered rollover block above step 1
+**0 an unanswered scandal is answered with silence and an unanswered finals night signs
+nobody** → trends drift → training → **2c the room settles** → market tick → **3b booked
+schedules resolve** → **3c the rival agencies act** → chart build → **3d the yearbook
+accrues** → group promo/decay → **4b rival groups read the chart** → **4c the fandom
+settles and then pays** → books (`weeklyBurn` − `weeklyMisc`) → **5b debt service** →
+**5c platform deals** → events → **6b the seven-year cliff** → **6c the survival show** →
+audition refresh (**and a rival poaches on the way out**) → fail state, then autosaves. An unnumbered rollover block above step 1
 announces a new season and, on a year boundary, holds the ceremony. Ordering matters
 for the economy — e.g. `releaseComeback` prepays the first promo week precisely because the
 final promo week clears `g.active` before step 5 bills.
@@ -107,12 +108,21 @@ The four ordering rules that are load-bearing rather than incidental:
   moved, so billing it earlier would price the week before the scandal that happened in
   it. `KP.merchWeek(g)` is the one derivation: step 4c credits it and `KP.ledger()`
   projects it. Two copies is how a HUD starts lying about income.
+- **2c runs before the bookings resolve, and 6b runs after the events.** `E.bondWeek`
+  drifts every pair toward `KP.bonds.base` before the week's cast bonds on top of it —
+  reversed, a booking's gain is immediately averaged back toward the middle and the diary
+  looks like it did nothing. `E.contractWeek` is last of the three because the burnout
+  event can remove the very person an expiry notice would be served to, and both leave
+  through `E.leaveGroup`, so whichever fires first leaves the group in one consistent shape.
 - **Step 0 answers a story nobody answered.** `st.scandal` is a question with a deadline,
   and the deadline is the tick. Resolving it at the top of `nextWeek` — before the clock
   moves — is what makes closing the tab a decision with one outcome rather than a modal
   that follows the player forever, and it is why `E.scandalRespond` must never refuse a
   free answer: gating it on `cost > money` alone is true at cost zero on a negative
-  balance, which left a broke agency permanently unable to resolve anything.
+  balance, which left a broke agency permanently unable to resolve anything. A survival
+  show's finals night is the second question of exactly this shape and is answered in
+  exactly the same place: `st.survival.ready` with no picks means the agencies took the
+  room. Anything the game asks and waits on belongs in step 0, never on a timer.
 - **3d reads the full chart, and `E.runAwards()` runs before `E.rollYear()`.** `st.chart`
   keeps twenty-five rows for one week and nothing else in the game remembers a chart ever
   happened, so `st.yearbook` is a live accumulator written while the data still exists —
@@ -238,6 +248,81 @@ a weekly commitment in `KP.ledger`'s `out.platform`, a multiplier on streaming r
 only, and `E.serviceDeals()` as step 5c on exactly the terms 5b has — step 5 has already
 billed the fee, so 5c only counts the term down and judges the deal on the way out.
 
+### The people as a system
+
+A group used to be `memberIds` and nothing else. Four things now hang off the people in
+it, and the first of them is what the other three are priced in.
+
+**A bond is per PAIR, and it lives in exactly one place.** `g.bonds` is
+`{ 'idA|idB': value }`, keyed order-independently by `KP.bondKey` — a pair is not a
+direction, and writing it both ways round would give two people two histories the first
+time a different code path touched them. `KP.chemistry()` averages them, `KP.chemPerf()`
+and `KP.chemEdge()` are the only things that read the average, and `E.bumpBond` is the
+only thing that writes one. Three rules hold it:
+
+- **A sub-unit has no bonds of its own.** `KP.bondHost()` routes a unit's reads and writes
+  to its parent, because the two people in a sub-unit are the same two people in the group.
+  A second copy would drift from the first the week the two acts had different schedules.
+- **`KP.bonds.mid` is measured, never reasoned about** — 57.0 over sixty ten-year games,
+  and deliberately not `base` (50, where a bond drifts with nothing happening). Anchored to
+  `base`, every group that does the ordinary thing carries a standing +2% on song quality,
+  which is Sprint 4's sentiment mistake in a different currency. A line-up of one returns
+  `mid` rather than `base`: a soloist is not a group with bad chemistry, and anchoring them
+  to `base` would tax every solo debut by the distance between the two constants.
+- **Bonds are rounded to one decimal on write.** `KP.save()` stringifies the whole state
+  every week and a 7-member group is 21 pairs.
+
+**A unit is a group record with a `parentId`**, which is why nothing in the chart pipeline,
+the books, the schedule board or the yearbook had to learn about it — all of them take a
+group. What a unit is *not* is a second payroll: `t.groupId` still points at the parent, so
+the same person is paid once, trains once and is injured once while appearing on two
+diaries. That single fact is what the following three exceptions exist to protect, and they
+are the whole of the special-casing:
+
+- `KP.ledger`'s `idols` line and `KP.totalFans` iterate `KP.mainGroups(st)`. Paying a unit
+  member twice would make a unit a running cost; counting its fandom twice would let a
+  player raise their own credit limit by forming one.
+- `KP.merchWeek` multiplies a unit by `KP.units.merchShare`. A unit's fandom is a *subset*
+  of its parent's — one person, one lightstick, now following two acts — so a weekly line
+  keyed to a head count has to be discounted. Albums, tickets and streams are not, because
+  those genuinely are a second thing that fan bought.
+- Sasaeng pressure (4c) and the Mood Maker lift (2b) run over main groups only. The crowd
+  outside the dorm is not there twice.
+
+A unit is also off the Rookie ballot (`E.runAwards`), or the prize becomes an annuity you
+re-win every year by splitting the same group a different way.
+
+**Every exit goes through `E.leaveGroup` and every disband through `disbandGroup`.** Both
+used to be written inline inside the burnout event, which is why positions were never
+redistributed after a departure — `E.assignPositions` now clears `m.position` before it
+assigns, so it is re-runnable and a group could no longer be left holding a Leader who
+walked out eighteen months earlier. `E.leaveGroup` prunes the leaver's pairs (a bond map
+that keeps a departed member averages in somebody who is not in the building), shrinks or
+folds any unit they were in, charges the fandom, the public mood and the reputation, and
+disbands the group if it empties. What happens to the *person* afterwards is the caller's:
+a graduate goes back to the trainee room, an expired contract walks out of the building.
+
+**A contract is `t.debutAbs` + `t.contractAbs`, stamped at debut and nowhere else.** A
+trainee has neither — a training agreement has nothing to renegotiate — and `normalise()`
+strips them from anybody without a `groupId` for the same reason. `KP.renewCost()` is what
+they are worth × what they think of you, and `KP.willRenew()` is the floor under that: below
+`refuseBelow` there is no number, which is the only place in the game money cannot answer.
+The two warnings `E.contractWeek` logs are stateless (`left === 52`, `left === 8`) because
+the tick runs exactly once a week, so an equality fires exactly once per person and needs no
+flag on the record.
+
+The cliff is a real decision and it is priced like one: measured over ten in-game years on
+the same seeds, an agency that never opens the renewal table finishes with **a quarter of
+the trophies** of one that does, and dies no more often. That is the shape a new decision
+should have — neutral before it, expensive to ignore after it.
+
+**A survival show is one record with a deadline.** `st.survival` holds the cast and the
+votes; `E.survivalWeek` accrues them and calls the finals on `endAbs`; `st.survival.ready`
+is a question step 0 answers with nobody. `t.fame` is what the finals actually hand out — a
+fandom at the debut showcase (`E.debut` reads it) that decays every week the person is not
+on a screen (`trainWeek`), so the show creates a deadline on the training plan rather than
+a free trainee.
+
 ### Save format
 
 `localStorage` key `idol_empire_save_v1`; autosave at the end of every tick and after
@@ -281,6 +366,20 @@ to change the state shape, and picking the wrong one breaks old files:
   `st.stats.tourLegs` / `st.stats.scandals` (`0`) are the rest of it. `t.status` gained a
   third value, `hiatus`, and `normalise()` sanitises anything it does not recognise back to
   `ok`: a file that has never heard of it simply has nobody on one.
+
+  Sprint 5 is additive too, and two of its defaults are worth reading before touching:
+  `g.bonds` back-fills **empty**, not seeded, because `KP.bondOf` answers `KP.bonds.base`
+  for a pair it has never heard of — an older file loads as a line-up that has neither
+  earned anything nor been put through anything, which is the only honest reading of a
+  history it never kept. `t.contractAbs` is *derived from the group's debut* rather than
+  from the load week: an idol who debuted six years ago walks straight into their renewal
+  year, which is what the save actually says happened. Stamping the term from "now" would
+  hand every long-running file seven free years. `t.fame` (`0`), `st.survival` (`null`, and
+  dropped whole rather than half-restored when its cast is gone), the per-group unit fields
+  and `st.stats.units` / `renewals` / `departures` / `shows` (`0`) are the rest. A unit whose
+  parent, kind or members the file no longer has is dropped in `normalise()` — after the
+  group loop, because every one of those checks reads a second group — and the booking
+  filter below it takes its diary with it.
 
 A record with two calendars on it, which nobody should tidy: on `g.releases[]`, **`y`/`w`
 mean the week promotions *wrapped*** (they always did, and 4–7 weeks after the fact),
@@ -368,6 +467,15 @@ anything that stretches the term (the miss branch) re-derives `weeksLeft` from
   behave, `KP.rivals` holds the constants every one of them shares, and `KP.rivalSpec()`
   is the only way state reaches either. Adding a fifth agency is one entry in `data.js`
   and nothing else — including for saves already in progress.
+- A unit kind is a data entry on the same terms: `KP.unitKinds` says what a sub-unit and a
+  solo debut are, `KP.units` holds the constants both share, and `KP.unitSpec()` /
+  `KP.unitKind()` are the only way state reaches either. A third kind is one entry.
+- **Anything that is worth ×1.00 somewhere is anchored to a MEASURED equilibrium, never to
+  a starting value.** `KP.fandom.midLoyal` / `midSenti` and `KP.bonds.mid` all exist for
+  this and all three were set from the harness rather than from reasoning. A modifier
+  anchored to where a number *starts* is a standing bonus for everybody instead of a spread
+  between the agency that works the system and the one that does not — see
+  `test/README.md`, which has the receipts for both times it was got wrong.
 - A tour routing, a streaming platform and a scandal are data entries, on the same terms:
   `KP.tours`, `KP.platforms`, `KP.scandals` say what they are, `KP.fandom` / `KP.deals` /
   `KP.scandal` hold the constants they share, and state reaches them only through

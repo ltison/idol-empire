@@ -298,11 +298,75 @@ everybody else thinks, and how much of the crowd is not at home. An eighth tab, 
 - The dormitory is the only thing that buys it back, which is a second job for a building
   that used to only speed up recovery
 
-## Backlog — what the next sprints add
+## Sprint 5 — shipped
 
-**Sprint 5 — depth on people**
-Member relationships and unit chemistry, sub-units, solo debuts, contract renewals and
-the 7-year cliff, graduations and line-up changes, survival-show recruitment.
+A group used to be a bag of six stat blocks with a name on it. Now it is a **room**: the
+people in it have a history with each other, a contract that runs out, and a second act
+they can be split into.
+
+**Relationships and chemistry**
+- One bond per **pair** of members, not one number per group — because an average never
+  tells you which two people are the problem. The line-up modal lists every pair, weakest
+  first
+- Built by being in the same place: a booking's cast, a promotion cycle, a run that peaked
+  top three. Spent by strain — an argument, a week where everybody was empty, and above
+  all a line-up that keeps changing
+- Chemistry is the average, and it is worth ×0.90–×1.10 on song quality and a little more
+  on a variety room, which is the one number in the comeback planner you cannot buy this
+  week. It also carries the group's morale, up or down, a fraction at a time
+- Anchored to where the simulation says a played line-up *settles* (57.0, measured over
+  sixty ten-year games), never to where one starts — the same rule Sprint 4's fandom
+  modifiers follow, for the same reason
+
+**Sub-units and solo debuts** — one mechanic, because a unit is a group record with a parent
+- Two or three of them, or one name on the poster. Its own concept, its own colour, its
+  own chart run, its own discography, its own place on the booking board
+- Its fandom is drawn **out of** the parent's rather than added to it — the same person
+  holding the same lightstick — so the weekly goods line is discounted to 35% and the
+  agency's total fandom does not count it twice. Albums, tickets and streams are not
+  discounted, because those are genuinely a second thing that fan bought
+- What a unit really costs is the roster: `t.groupId` still points at the parent, so a unit
+  member is paid once, trains once and runs out of stamina once — while appearing on two
+  diaries. A sub-unit promoting during the main group's comeback is the same four people
+- What it pays back is a share of every fan it wins, which follows the whole group home
+- A unit is not a rookie. Its members debuted years ago and its fandom came out of an
+  established act, so it is off the Rookie of the Year ballot — otherwise the prize would
+  be an annuity you re-win by splitting the same group a different way
+
+**Contracts and the seven-year cliff**
+- Seven years from debut, and the last of them is a negotiation on the Trainees tab
+- What they ask is what they are worth — their own ceiling, the fandom behind them, the
+  trophies on the shelf — multiplied by **what they think of you**: morale and the room,
+  which is what bonds are ultimately for. A looked-after star re-signs for a third of what
+  a worked-into-the-ground one will not re-sign for at any price
+- Below mood 30 there is no number. It is the only place in the game money cannot answer
+- Miss it and they walk the week the term ends, and about half the time they turn up in one
+  of the four agencies' buildings. Measured over ten in-game years, an agency that never
+  opens the renewal table finishes with **a quarter of the trophies** of one that does —
+  and dies no more often, which is what makes it a decision rather than a difficulty
+
+**Graduations and line-up changes**
+- A member can be taken out of the line-up, and a free trainee can be brought in
+- Whoever leaves takes the fandom that was there for them, the public mood and some of the
+  agency's reputation with them — and the room takes it twice as hard if they were close
+- Whoever arrives starts as a stranger to everybody: months of chemistry, which is the real
+  price of a replacement rather than the showcase fee
+- Positions redistribute the same week, and a group with nobody left disbands. Every exit —
+  a graduation, a burnout, an expired contract — now goes through one path, which is how the
+  Leader chip stopped being handed to somebody who had walked out eighteen months earlier
+
+**Survival-show recruitment**
+- Ten weeks of television for a finals night. Reputation and public mood every week it is on
+  air, whoever wins
+- The public votes on what it can see — visuals, presence, whether they are entertaining —
+  which is deliberately not the ceiling column. The contestant the audience wants and the
+  contestant the scouting report wants are rarely the same person, and you sign two
+- Pre-debut fame is a fandom at the debut showcase and it **evaporates in the practice
+  room**: debut them before they are ready, or debut somebody nobody remembers
+- Everything you leave in that room is signed by the agencies in the same week. If the week
+  turns without an offer, all of it is
+
+## Backlog — what the next sprints add
 
 **Sprint 6 — presentation**
 Album art generator, per-group visual identity carried through the UI, a year-in-review
