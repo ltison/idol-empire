@@ -366,11 +366,69 @@ they can be split into.
 - Everything you leave in that room is signed by the agencies in the same week. If the week
   turns without an offer, all of it is
 
-## Backlog — what the next sprints add
+## Sprint 6 — shipped
 
-**Sprint 6 — presentation**
-Album art generator, per-group visual identity carried through the UI, a year-in-review
-recap screen, and a stats/records hall.
+Five sprints of mechanics, and the game still had no memory and no face. Every song was a
+row of text, every group looked like every other group, and a chart year vanished at the
+rollover with nothing but a list of prize-winners left behind. This sprint is entirely
+about what is on the screen — no rule changed, and the A/B against the previous build came
+back bit-identical on every economic metric.
+
+**A sleeve for every song, and not one byte of art**
+- A cover is a pure function of the song: three colours, a motif and ten numbers, all
+  derived from the title, the concept and the act, painted as inline SVG. Nothing is stored
+  in the save, so a discography exported three builds ago still shows the right jackets and
+  re-skinning the whole catalogue is an edit to one object in `data.js`
+- **The palette is the concept and the motif is the song.** Every Dark Fantasy title track
+  is cut from the same three colours across four different agencies, so a discography reads
+  as a run of eras; the motif comes from the hash, so two songs of one concept are still two
+  different sleeves. Six motifs × ten palettes, and a ten-year run uses all of both
+- The act's lightstick colour rides on top as the accent, which is what makes four sleeves
+  read as one shelf
+- One song is one jacket **wherever** it is looked at — the ladder this week, the shelf in
+  year nine, a ceremony record twenty years old — because the seed is built in exactly one
+  place. That is an invariant, not a convention: a song changing its face when it stops
+  promoting is the most visible way a generated cover can be wrong
+- The comeback planner shows the real sleeve as you retype the title and switch concepts.
+  It is not a mock-up; it is already decided before the song is
+
+**An act that looks like itself, everywhere**
+- The chart ladder used to paint every one of the player's rows the same pink. Now each rung
+  carries the act's own colour — and a rival agency's rows carry theirs, so a week where
+  four buildings are all on the chart is legible at a glance
+- The same colour reaches the group card, its line-up's avatars, its rows on the schedule
+  board, and the chip on every trainee card that says which act they are in
+
+**The year in review**
+- A page for the year that just ended: the song it is remembered by at sleeve size, what was
+  released, played, sold and lost, where the agency stood on the last night of December, and
+  the chart year as a table with the player's own best act shown at its real position even
+  when that is #25
+- It opens **before** the ceremony, because the two answer different questions — this is what
+  you did, the ceremony is what it won — and hands over to it with a button
+- Written for every year, including the ones with nothing on the ballot. A year spent
+  signing, building and nearly going under is the year you most want a page about
+- Both are archived on the Chart tab for as long as the save lives
+
+**The hall of records**
+- Ten high-water marks for the whole run: the largest fandom, the deepest the balance ever
+  got, the biggest first week, the longest reign at #1, the biggest crowd and gate, the
+  costliest signature, the best chart year
+- Records nobody has set yet are shown rather than hidden — an empty row is a thing to go
+  and do, and a hall that only grows hides what is missing
+- One door writes them (`E.record`), one data entry defines them, and nothing is ever taken
+  off the board
+
+The whole sprint costs **8% of the save file** — the ten years of reviews are what that
+buys, and they are the only permanent record of a chart year in the game.
+
+## Backlog
+
+Empty. Six sprints in, the planned direction is fully built: the week, the year, the
+schedule, the market, the four rival agencies, the fandom, the people, and now the face and
+the memory. Anything after this is a new plan rather than the rest of the old one — the
+clearest openings are the rival agencies growing the halves the player already has (units,
+member contracts, a fandom of their own) and a second win condition that is not the chart.
 
 ## Layout
 

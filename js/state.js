@@ -340,12 +340,13 @@
       scandal: null,      // a story the agency has one week to answer
       fallout: null,      // a denial that was a lie, waiting to come back
       survival: null,     // the show on air, and the finals night it owes you
+      reviews: [],        // one record per year that ended, newest first
+      pendingReview: null,// a year the UI still owes the player a look back at
+      records: {},        // the high-water marks, by KP.recordKinds key
       trendWeek: 0,
       trends: {},
-      stats: {
-        releases: 0, wins: 0, no1: 0, stages: 0, varietyShows: 0, lives: 0, tickets: 0,
-        tourLegs: 0, scandals: 0, units: 0, renewals: 0, departures: 0, shows: 0
-      }
+      stats: KP.blankStats(),
+      statsY: KP.blankStats()
     };
     KP.concepts.forEach(c => { st.trends[c.k] = U.irnd(35, 70); });
 
@@ -504,6 +505,108 @@
 
   KP.concept = (k) => KP.concepts.find(c => c.k === k) || KP.concepts[0];
   KP.trait = (k) => KP.traits.find(t => t.k === k);
+
+  /* ================================ sleeves ================================
+     A cover is a pure function of the song and NOTHING is stored: three
+     colours off KP.art, a motif, and ten numbers a painter can shape itself
+     with. Given the same seed it returns the same jacket forever, which is the
+     only reason the chart ladder can afford to draw fifty of them on a redraw
+     and a save from an older build can still show its own discography.
+
+     `conceptKey` decides the palette where there is one — a player release
+     knows its concept — and where there is not (an anonymous market song is a
+     title and an artist and nothing else) the hash picks one, so the whole
+     ladder is covered rather than only the half the game has records for.
+     `accent` is the act's lightstick colour and is what makes four sleeves
+     read as one discography; it falls back to the palette's own light so a
+     cover never depends on being handed one. */
+  KP.cover = function (seed, conceptKey, accent) {
+    const A = KP.art;
+    const h = U.hash(seed);
+    const names = Object.keys(A.palettes);
+    const c = conceptKey ? KP.concepts.find(x => x.k === conceptKey) : null;
+    const pal = A.palettes[(c && c.pal)] || A.palettes[names[h % names.length]];
+    // A small LCG off the hash. The painter never rolls: everything it needs to
+    // place a shape comes out of here, so ui.js stays a pure state → HTML
+    // function and two renders of one song are byte-identical.
+    const r = [];
+    let s = (h ^ 0x9E3779B9) >>> 0;
+    for (let i = 0; i < 10; i++) { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; r.push(s / 4294967296); }
+    return {
+      id: h.toString(36),
+      pal,
+      accent: typeof accent === 'string' && accent ? accent : pal[2],
+      motif: A.motifs[(h >>> 7) % A.motifs.length],
+      r
+    };
+  };
+
+  /* THE seed. One song is drawn from one string, wherever it is being looked at
+     — a chart rung this week, a discography row in year nine, a ceremony record
+     that outlives the release by twenty years — and this is the only place that
+     string is built. Written twice, a song grows a second face the week it moves
+     from the ladder into the shelf, which is the single most visible way a
+     generated jacket can be wrong.
+
+     Ours is keyed by the group id, because two agencies may both have a song
+     called "Neon Halo" and they are not the same record. Somebody else's is
+     keyed by the artist name, because that is all the market ever tells us. */
+  KP.songCover = function (o) {
+    const seed = o.mine
+      ? o.title + '|' + (o.concept || '') + '|' + (o.groupId || '')
+      : o.title + '|' + (o.artist || '');
+    return KP.cover(seed, o.concept || null, o.color || null);
+  };
+
+  /* The three readers. A release, a chart row, and an archived record — the last
+     of which may carry no concept at all (a rival's song is never stored with
+     one), in which case the hash picks the palette exactly as it does for the
+     anonymous half of the ladder. */
+  KP.relCover = (g, rel) => KP.songCover({
+    mine: true, title: rel.title, concept: rel.concept, color: g.color, groupId: g.id
+  });
+
+  KP.rowCover = function (st, row) {
+    if (row.mine) {
+      const g = st.groups.find(x => x.id === row.groupId);
+      if (g) {
+        return KP.songCover({
+          mine: true, title: row.title, groupId: g.id, color: g.color,
+          concept: (g.active && g.active.title === row.title) ? g.active.concept : g.concept
+        });
+      }
+    }
+    // A rival agency's release wears its agency colour; the anonymous market
+    // has nobody behind it and keeps the palette's own light.
+    const act = row.rid ? KP.rivalAct(st, row.rid) : null;
+    const sp = act ? KP.rivalSpec(act.r) : null;
+    return KP.songCover({
+      mine: false, title: row.title, artist: row.artist,
+      concept: act ? act.g.concept : null, color: sp ? sp.color : null
+    });
+  };
+
+  /* ============================= the record books =========================
+     A high-water mark per kind, held in st.records as { k: {v, by, sub, y, w} }
+     and written only by E.record(). Everything here is a read. */
+  KP.recordSpec = (k) => KP.recordKinds.find(r => r.k === k) || null;
+
+  KP.recordsOf = (st) => KP.recordKinds.map(spec => ({
+    spec, rec: (st.records || {})[spec.k] || null
+  }));
+
+  KP.recordsSet = (st) => KP.recordKinds.reduce((n, s) => n + ((st.records || {})[s.k] ? 1 : 0), 0);
+
+  KP.reviewOf = (st, y) => (st.reviews || []).find(r => r.y === y) || null;
+
+  /* Every counter the run keeps, and the one place the list is written down.
+     st.stats is the career total and st.statsY is the same set for the year in
+     progress — E.bumpStat writes both, so a year-in-review can never disagree
+     with the career figure it is a slice of. */
+  const STAT_KEYS = ['releases', 'wins', 'no1', 'stages', 'varietyShows', 'lives', 'tickets',
+    'tourLegs', 'scandals', 'units', 'renewals', 'departures', 'shows', 'debuts'];
+  KP.STAT_KEYS = STAT_KEYS;
+  KP.blankStats = () => STAT_KEYS.reduce((o, k) => { o[k] = 0; return o; }, {});
 
   /* ====================== relationships and chemistry ======================
      One bond per PAIR, stored on the group as { 'idA|idB': value }, and every
@@ -979,11 +1082,36 @@
     if (typeof st.pendingAwards !== 'number') st.pendingAwards = null;
     if (typeof st.calendarYear !== 'number') st.calendarYear = 2025 + st.year;
     if (typeof st.scoutRefreshedWeek !== 'number') st.scoutRefreshedWeek = KP.absWeek(st);
-    st.stats = Object.assign(
-      {
-        releases: 0, wins: 0, no1: 0, stages: 0, varietyShows: 0, lives: 0, tickets: 0,
-        tourLegs: 0, scandals: 0, units: 0, renewals: 0, departures: 0, shows: 0
-      }, st.stats);
+    st.stats = Object.assign(KP.blankStats(), st.stats);
+    // The same counters for the year in progress. Back-filled to ZERO rather
+    // than to st.stats: a file written before the year-in-review existed has no
+    // idea how much of its career happened since January, and starting the
+    // year's column from the career total would print a first review claiming
+    // every release the agency has ever made.
+    st.statsY = Object.assign(KP.blankStats(), st.statsY);
+    KP.STAT_KEYS.forEach(k => {
+      if (typeof st.stats[k] !== 'number' || !isFinite(st.stats[k])) st.stats[k] = 0;
+      if (typeof st.statsY[k] !== 'number' || !isFinite(st.statsY[k])) st.statsY[k] = 0;
+    });
+    // The record books and the years already looked back on. Both are additive
+    // and both are dropped rather than repaired when they make no sense: a
+    // record for a kind this build no longer has is a row nothing can label,
+    // and a review with no year on it cannot be filed or found again.
+    if (!st.records || typeof st.records !== 'object' || Array.isArray(st.records)) st.records = {};
+    Object.keys(st.records).forEach(k => {
+      const r = st.records[k];
+      if (!KP.recordSpec(k) || !r || typeof r !== 'object'
+        || typeof r.v !== 'number' || !isFinite(r.v)) { delete st.records[k]; return; }
+      if (typeof r.by !== 'string') r.by = '';
+      if (typeof r.sub !== 'string') r.sub = '';
+      if (typeof r.y !== 'number' || !isFinite(r.y)) r.y = st.year;
+      if (typeof r.w !== 'number' || !isFinite(r.w)) r.w = st.week;
+    });
+    if (!Array.isArray(st.reviews)) st.reviews = [];
+    st.reviews = st.reviews
+      .filter(r => r && typeof r === 'object' && typeof r.y === 'number' && isFinite(r.y))
+      .slice(0, KP.awards.historyYears);
+    if (typeof st.pendingReview !== 'number') st.pendingReview = null;
     // A story the run was in the middle of answering. Both of these are plain
     // records with a group id in them, and a group can disband between the week
     // the file was written and the week it is opened — a scandal about nobody is

@@ -23,7 +23,11 @@
   --muted: #9C8FC7;
   --dim:   #6B5F92;
 
-  --accent: var(--pink);          /* overridden per group card */
+  --accent: var(--pink);          /* overridden per act — see .group-card, .rung */
+  /* ...and its diluted half. CSS cannot fade an arbitrary hex without
+     color-mix, so ui.js's skin() writes both at once and every surface that
+     carries an act's identity gets a wash as well as a line. */
+  --wash: rgba(255,46,134,.20);
   --duo: linear-gradient(100deg, var(--pink), var(--lilac) 45%, var(--cyan));
 
   --r-lg: 20px;
@@ -226,6 +230,8 @@ kbd{
 .chip.hot{ background:rgba(255,46,134,.16); border-color:rgba(255,46,134,.4); color:#FFA8CE; }
 .chip.cool{ background:rgba(69,232,255,.13); border-color:rgba(69,232,255,.35); color:#A8ECFF; }
 .chip.win{ background:rgba(255,203,71,.14); border-color:rgba(255,203,71,.4); color:var(--gold); }
+/* an act named on somebody else's card, in its own colour */
+.chip.act{ background:var(--wash); border-color:var(--accent); color:var(--text); }
 
 /* stat meters */
 .stat{ display:grid; grid-template-columns:34px 1fr 30px; align-items:center; gap:8px; margin:5px 0; }
@@ -254,6 +260,23 @@ kbd{
    here: avatar() already omits the monogram when there is a photo, and the
    nationality badge is a child that would inherit it and lose its flag. */
 .ava-photo{ background-size:cover; background-position:50% 16%; }
+
+/* ---------- sleeves ----------
+   One inline SVG, five sizes. Everything inside is drawn in a 64×64 viewBox, so
+   the size lives entirely here and coverArt() never has to know how big it is
+   about to be. The ring is the same trick .ava uses: a hairline of the surface's
+   own accent, so a discography reads as one act's shelf. */
+.cover{
+  display:block; flex:none; border-radius:6px; width:64px; height:64px;
+  box-shadow:0 2px 10px rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.10);
+  background:var(--ink-2);
+}
+.cover.xs{ width:26px; height:26px; border-radius:4px; }
+.cover.sm{ width:36px; height:36px; }
+.cover.md{ width:52px; height:52px; border-radius:8px; }
+.cover.lg{ width:76px; height:76px; border-radius:10px; }
+.cover.xl{ width:132px; height:132px; border-radius:12px; }
+@media (max-width:880px){ .cover.xl{ width:96px; height:96px; } }
 
 /* ==========================================================================
    DASHBOARD
@@ -377,6 +400,9 @@ kbd{
 .member-strip{ display:flex; gap:7px; flex-wrap:wrap; }
 .member{ display:grid; gap:4px; justify-items:center; width:58px; text-align:center; }
 .member .ava{ width:40px; height:40px; font-size:13px; border-radius:12px; }
+/* the line-up wears the lightstick too — a hairline, so twenty faces on the
+   Groups tab still sort themselves into acts without shouting */
+.member .ava{ box-shadow:0 0 0 1.5px var(--wash); }
 .member em{ font-style:normal; font-size:10px; font-weight:700; line-height:1.1; }
 .member i{ font-style:normal; font-family:var(--mono); font-size:8px; color:var(--dim); letter-spacing:.06em; text-transform:uppercase; }
 
@@ -412,7 +438,12 @@ kbd{
   display:grid; grid-template-columns:auto 1fr auto auto; gap:10px; align-items:center;
   font-size:12px; padding:6px 10px; border-radius:var(--r-sm); background:rgba(0,0,0,.24);
 }
+/* the same row with a sleeve in front of it */
+.disc-row.has-art{ grid-template-columns:auto auto 1fr auto auto; padding:5px 10px; }
 .disc-row .pk{ font-family:var(--mono); font-size:11px; }
+
+/* the now-playing tile: the sleeve and what it is doing, side by side */
+.now-playing{ display:flex; gap:14px; align-items:center; }
 
 /* the week board */
 .sched-week{ padding:14px 16px; }
@@ -437,20 +468,60 @@ kbd{
    ========================================================================== */
 .ladder{ display:grid; gap:3px; }
 .rung{
-  display:grid; grid-template-columns:40px 1fr auto; gap:14px; align-items:center;
-  padding:9px 14px; border-radius:var(--r-sm); background:rgba(255,255,255,.03);
+  display:grid; grid-template-columns:34px auto 1fr auto; gap:12px; align-items:center;
+  padding:7px 14px; border-radius:var(--r-sm); background:rgba(255,255,255,.03);
   border:1px solid transparent; position:relative; overflow:hidden;
 }
 .rung .rk{ font-family:var(--display); font-size:17px; color:var(--dim); text-align:right; }
 .rung .ttl{ font-weight:700; font-size:13px; }
 .rung .art{ font-family:var(--mono); font-size:10px; color:var(--dim); letter-spacing:.08em; text-transform:uppercase; }
 .rung .pts{ font-family:var(--mono); font-size:12px; color:var(--muted); }
+/* An act's own colour rather than the app's: the ladder is where a run's four
+   lightsticks are all on screen at once, and the pink wash every row used to get
+   was the one place a group stopped being itself. */
 .rung.mine{
-  border-color:var(--pink);
-  background:linear-gradient(90deg, rgba(255,46,134,.22), rgba(255,46,134,.04));
+  border-color:var(--accent);
+  box-shadow:inset 3px 0 0 var(--accent);
+  background:linear-gradient(90deg, var(--wash), transparent 72%);
 }
 .rung.mine .rk{ color:#fff; }
+/* somebody else's building gets a line and no wash — visible, not competing */
+.rung:not(.mine)[style]{ box-shadow:inset 2px 0 0 var(--accent); }
 .rung.top1 .rk{ color:var(--gold); }
+@media (max-width:880px){ .rung{ grid-template-columns:26px auto 1fr auto; gap:9px; padding:6px 10px; } }
+
+/* ==========================================================================
+   THE HALL OF RECORDS + THE YEAR IN REVIEW
+   ========================================================================== */
+.recs{ display:grid; gap:4px; }
+.rec{
+  display:grid; grid-template-columns:26px 1fr auto; gap:12px; align-items:center;
+  padding:9px 12px; border-radius:var(--r-sm); background:rgba(0,0,0,.24);
+  border-left:2px solid var(--stroke-2);
+}
+/* a record nobody has set yet is shown, not hidden: it is a thing to go and do */
+.rec.is-empty{ border-left-color:transparent; opacity:.45; }
+.rec-ic{ font-size:15px; text-align:center; }
+.rec-nm{ display:grid; gap:1px; font-size:12.5px; font-weight:600; }
+.rec-nm i{ font-style:normal; font-size:10.5px; font-weight:400; color:var(--dim); }
+.rec-v{ display:grid; gap:1px; text-align:right; }
+.rec-v b{ font-family:var(--mono); font-size:14px; white-space:nowrap; }
+.rec-v i{
+  font-style:normal; font-family:var(--mono); font-size:9px; letter-spacing:.08em;
+  text-transform:uppercase; color:var(--dim);
+}
+@media (max-width:880px){
+  .rec{ grid-template-columns:22px 1fr; }
+  .rec-v{ grid-column:2; text-align:left; }
+}
+
+/* the song a year is remembered by, at sleeve size */
+.rev-song{
+  display:flex; gap:18px; align-items:center; margin:0 0 18px;
+  padding:16px; border-radius:var(--r-md);
+  background:linear-gradient(100deg, rgba(255,255,255,.05), rgba(255,255,255,.015));
+}
+@media (max-width:560px){ .rev-song{ flex-direction:column; align-items:flex-start; gap:12px; } }
 
 /* ==========================================================================
    FEED
@@ -496,6 +567,8 @@ kbd{
   padding:10px 13px; border-radius:var(--r-md); background:rgba(255,255,255,.04);
   border:1px solid transparent; text-align:left; width:100%;
 }
+/* the one prize awarded to an object rather than to an act, and objects have faces */
+.opt.has-art{ grid-template-columns:auto 1fr auto auto; }
 .opt:hover{ background:rgba(255,255,255,.08); }
 .opt.is-on{ border-color:var(--pink); background:rgba(255,46,134,.13); }
 .opt.locked{ opacity:.4; cursor:not-allowed; }
@@ -525,6 +598,11 @@ kbd{
   display:grid; grid-template-columns:repeat(auto-fit,minmax(110px,1fr)); gap:12px;
   padding:14px; border-radius:var(--r-md); background:rgba(0,0,0,.3); margin-top:6px;
 }
+/* Six tiles want two rows of three, not one row of six and an orphan: auto-fit
+   solves for the widest tile and a label like "Best act of 62 on the chart" is
+   the one that decides the column. */
+.est.g3{ grid-template-columns:repeat(3,1fr); }
+@media (max-width:560px){ .est.g3{ grid-template-columns:repeat(2,1fr); } }
 .est div{ display:grid; gap:2px; }
 .est b{ font-family:var(--mono); font-size:17px; }
 .est span{ font-family:var(--mono); font-size:9px; letter-spacing:.14em; text-transform:uppercase; color:var(--dim); }

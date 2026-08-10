@@ -120,8 +120,15 @@
     // stays in st.scandal with its own banner on the Fandom tab and its own week
     // to be answered in.
     if (st.over) return ui.gameOver();
+    // The year that just ended, in two acts: what you did, and then what it won.
+    // Two independent claims rather than one — a year with nothing on the ballot
+    // has a review and no ceremony at all — and the review's own button is what
+    // hands over to the ceremony, so the ranking below never has to arbitrate
+    // between them. Saved before either is shown, so a closed tab cannot make it
+    // happen twice; both are archived on the Chart tab regardless.
+    const reviewYear = KP.engine.claimReview(st);
+    if (reviewYear != null) { KP.save(); return ui.openReview(reviewYear); }
     const awardYear = KP.engine.claimAwards(st);
-    // Saved before it is shown, so a closed tab cannot make it happen twice.
     if (awardYear != null) { KP.save(); return ui.openAwards(awardYear); }
     // A finals night is the second thing in the game that asks a question and
     // waits, so it is ranked beside the scandal and above the weekly toasts.
@@ -138,6 +145,8 @@
   function showPendingAwards() {
     const st = KP.state;
     if (!st || st.over) return;
+    const rev = KP.engine.claimReview(st);
+    if (rev != null) { KP.save(); return ui.openReview(rev); }
     const y = KP.engine.claimAwards(st);
     if (y == null) {
       // A run reopened in the middle of a story still owes the player the
@@ -306,6 +315,19 @@
       KP.save();                    // a signature must survive a closed tab
       ui.toast(r.signed ? 'Signed ' + r.signed + ' off the finals stage.'
         : 'The agencies took the room.', r.signed ? 'good' : 'bad');
+    },
+
+    /* ---- looking back ---- */
+    'open-review'(d) { ui.openReview(parseInt(d.y, 10)); },
+    // The hand-off from the scrapbook to the ceremony. It claims rather than
+    // reads, so the ceremony is owed exactly once however the player got here —
+    // straight off the tick, or by re-opening the review from the Chart tab
+    // after closing the modal on it.
+    'review-next'() {
+      const y = KP.engine.claimAwards(KP.state);
+      if (y == null) return ui.closeModal();
+      KP.save();
+      ui.openAwards(y);
     },
 
     'scout-rival'(d) {

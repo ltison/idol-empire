@@ -78,8 +78,8 @@ schedules resolve** → **3c the rival agencies act** → chart build → **3d t
 accrues** → group promo/decay → **4b rival groups read the chart** → **4c the fandom
 settles and then pays** → books (`weeklyBurn` − `weeklyMisc`) → **5b debt service** →
 **5c platform deals** → events → **6b the seven-year cliff** → **6c the survival show** →
-audition refresh (**and a rival poaches on the way out**) → fail state, then autosaves. An unnumbered rollover block above step 1
-announces a new season and, on a year boundary, holds the ceremony. Ordering matters
+audition refresh (**and a rival poaches on the way out**) → **7b the record books** → fail state, then autosaves. An unnumbered rollover block above step 1
+announces a new season and, on a year boundary, **remembers the year and then** holds the ceremony. Ordering matters
 for the economy — e.g. `releaseComeback` prepays the first promo week precisely because the
 final promo week clears `g.active` before step 5 bills.
 
@@ -123,6 +123,20 @@ The four ordering rules that are load-bearing rather than incidental:
   show's finals night is the second question of exactly this shape and is answered in
   exactly the same place: `st.survival.ready` with no picks means the agencies took the
   room. Anything the game asks and waits on belongs in step 0, never on a timer.
+- **7b is the last thing the tick does, on purpose.** A record is a high-water mark, and a
+  high-water mark has to be a number the player could have seen. A fancam in step 6 adds
+  fans and a scandal takes them away, so a level sampled before the events is a peak that
+  existed for nobody; sampled at the end it means "the biggest it ever was on a Sunday
+  night", which is the only reading a screen can honestly print. Only the three records that
+  are a *level* are sampled here — a gate, a first week and a reign only exist for one line
+  of one function and are stamped where they happen.
+- **`E.runReview()` runs before `E.runAwards()`, and both before `E.rollYear()`.** All three
+  read `st.yearbook` and the third empties it. The review comes first because it records
+  what the year *was*: run after the ceremony it would report a reputation, a fandom and a
+  standing the trophies had already moved, and the modal that opens straight after it would
+  have been spoiled by the page before. It is also the only one of the three that runs
+  unconditionally — the ceremony returns early on an empty ballot, and a year with no
+  releases in it is exactly the year a player most wants a page about.
 - **3d reads the full chart, and `E.runAwards()` runs before `E.rollYear()`.** `st.chart`
   keeps twenty-five rows for one week and nothing else in the game remembers a chart ever
   happened, so `st.yearbook` is a live accumulator written while the data still exists —
@@ -323,6 +337,63 @@ fandom at the debut showcase (`E.debut` reads it) that decays every week the per
 on a screen (`trainWeek`), so the show creates a deadline on the training plan rather than
 a free trainee.
 
+### The face and the memory
+
+Sprint 6 changed no rule — the A/B against the previous build is bit-identical on every
+economic metric — and it is still the sprint most likely to be broken by a tidy-up, because
+all of it is derived and none of it is stored.
+
+**A sleeve is a pure function of the song and nothing about it is in the save.**
+`KP.cover(seed, conceptKey, accent)` in `state.js` returns three colours off `KP.art`, a
+motif and ten numbers; `coverArt()` in `ui.js` is the only thing that paints one. The split
+is `KP.traits`' split with the engine: **palette is meaning, motif is identity.** The
+palette comes from the concept (`c.pal`), so a Dark Fantasy era looks like one across four
+agencies; the motif comes from the hash, so two songs of one concept are two sleeves. A new
+palette is one entry in `KP.art.palettes` plus one `pal` on a concept; a new motif is one
+name in `KP.art.motifs` plus one branch in the painter.
+
+Three rules hold it:
+
+- **`KP.songCover()` is the only place a seed is built.** `KP.relCover` (a release),
+  `KP.rowCover` (a chart row) and every archived record funnel through it, and the harness
+  asserts they still agree. Written in two places, a song grows a second face the week it
+  moves off the ladder and onto the shelf — the most visible way a generated cover can be
+  wrong. Ours is keyed by group id (two agencies may both have a "Neon Halo"); somebody
+  else's is keyed by the artist name, because that is all the market ever tells us.
+- **The painter never rolls.** Every placement comes out of `cv.r`, which `KP.cover` derived
+  from the song, so `ui.js` stays a pure `state → HTML` function and two renders of one song
+  are byte-identical. `U.hash` is the wider hash everything new derives from; `U.hue` is
+  deliberately left alone because it is baked into two save back-fills (`t.face`,
+  `g.retireAbs`) and widening it would re-roll every portrait in every existing file.
+- **Only our own songs store a concept.** `accrueYearbook` stamps `concept`/`color` on a
+  yearbook song when `r.mine`, and a rival's archived song simply has none — the hash picks
+  its palette exactly as it does for the anonymous half of the ladder. A year of rival
+  titles carrying two dead fields each is save size spent on a jacket nothing prints.
+
+**`--accent` now travels with `--wash`.** CSS cannot fade an arbitrary hex without
+`color-mix`, and an act's identity has to reach a background as well as a border, so
+`skin(color)` in `ui.js` writes both at once and every surface that carries an act — the
+group card, a chart rung, a schedule row, a trainee's group chip — gets them together.
+
+**`E.bumpStat` is the one door for the counters** the way `E.earn` is for money: `st.stats`
+is the career and `st.statsY` is the year in progress, they are the same fourteen keys
+(`KP.STAT_KEYS`), and `E.rollYear` clears the second. Written apart, a year-in-review starts
+disagreeing with the career total it is a slice of the first time somebody adds a counter and
+updates one of them. **`E.record` is the same door for the record books**: every entry in
+`KP.recordKinds` is a MAXIMUM, so one comparison and one stamp covers all ten, and a
+"lowest" or a "best rank" would need its own empty state and its own comparison. It returns
+the entry it wrote, which is the only sanctioned way to reach into `st.records` — used once,
+by `runReview`, to restamp the one record that is about a year rather than a week.
+
+**A review is stored, a headline is not.** `E.runReview` writes numbers; which of them is
+*the* number is a reading of the year and is built in `ui.js`, the same way `KP.fanMods` is
+derived in `state.js` and printed in `ui.js`. The review also deliberately does **not**
+quote a share of the chart year: the ladder is fifty ranks deep and sixty acts wide, and an
+anonymous market name is a catalogue of seven releases rather than an act, so a year that
+won the daesang prints as "2% of the chart". `KP.awards.rivalRateShare` exists to discount
+exactly that distortion on the ballot; the review answers it by quoting weeks at #1 and by
+showing the player's own best act at its true position however far down that is.
+
 ### Save format
 
 `localStorage` key `idol_empire_save_v1`; autosave at the end of every tick and after
@@ -380,6 +451,20 @@ to change the state shape, and picking the wrong one breaks old files:
   parent, kind or members the file no longer has is dropped in `normalise()` — after the
   group loop, because every one of those checks reads a second group — and the booking
   filter below it takes its diary with it.
+
+  Sprint 6 is additive too, and it is the cheapest sprint to load because none of the new
+  presentation is stored: a cover is derived every time. What *is* stored back-fills as
+  `st.reviews` (`[]`), `st.pendingReview` (`null`), `st.records` (`{}`) and `st.statsY`.
+  Three of its defaults are worth reading before touching. `st.statsY` back-fills to **zero,
+  not to `st.stats`** — an older file has no idea how much of its career happened since
+  January, and starting the year's column from the career total would print a first review
+  claiming every release the agency ever made. A record whose kind this build no longer has
+  is *dropped* rather than repaired, because it is a row nothing can label; a review with no
+  year on it goes the same way, because it cannot be filed or found again. And an older save
+  simply has no reviews for the years it already played: that history was never kept, and
+  inventing one would be worse than the gap. The two fields the yearbook grew
+  (`songs[k].concept` / `.color`) are absent on an older file and the sleeve falls back to
+  the hash palette — the same jacket the anonymous half of the ladder has always worn.
 
 A record with two calendars on it, which nobody should tidy: on `g.releases[]`, **`y`/`w`
 mean the week promotions *wrapped*** (they always did, and 4–7 weeks after the fact),
@@ -481,6 +566,12 @@ anything that stretches the term (the miss branch) re-derives `weeksLeft` from
   `KP.scandal` hold the constants they share, and state reaches them only through
   `KP.showSpec()`, `KP.platformSpec()` and `KP.scandalSpec()` — so a fifth scandal kind or
   a fourth platform is one entry in `data.js`, including for saves already in progress.
+- A record is a data entry: `KP.recordKinds` says what it is and how it prints (`fmt`),
+  `E.record()` is the only thing that writes one, and a new record is one entry plus one
+  call at the place the thing actually happens. Every one of them is a maximum.
+- A palette and a motif are data entries: `KP.art` says what a sleeve can be made of and a
+  concept's `pal` says which palette it means. A new palette is one entry plus one `pal`; a
+  new motif is one name plus one branch in `coverArt()`.
 - A portrait is addressed by index, never by filename. `KP.faces.count` in `data.js` is
   the only number to touch when the pool grows and `KP.faces.src()` the only place a path
   is built; `count: 0` disables portraits and every avatar falls back to the gradient

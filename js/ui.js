@@ -31,6 +31,93 @@
       src ? '' : initial}<span class="ava-flag">${t.flag}</span></div>`;
   }
 
+  /* ------------------------------- the sleeve ------------------------------
+     KP.cover() decides what a song looks like; this is the only place that
+     paints one. Inline SVG rather than an <img>, for the reason avatar() gives:
+     #stage is rebuilt wholesale on every click, and a raster node re-decodes and
+     flashes where a vector costs nothing. Everything is drawn in a 64×64
+     viewBox and sized entirely by CSS, so one function is a 26px row thumbnail,
+     a 72px now-playing tile and a 200px sleeve.
+
+     Nothing here rolls. Every placement comes out of cv.r, which KP.cover
+     derived from the song itself — so two renders of one song are byte-identical
+     and ui.js stays a pure state → HTML function.
+
+     A new motif is one name in KP.art.motifs plus one branch below, the same
+     seam a new trait effect has with traitMul(). */
+  function coverArt(cv, cls) {
+    const p = cv.pal, r = cv.r, ac = cv.accent;
+    const id = 'sl' + cv.id;
+    const n = (x) => Math.round(x * 10) / 10;
+    let art;
+
+    if (cv.motif === 'rings') {
+      const cx = n(14 + r[0] * 36), cy = n(14 + r[1] * 36);
+      art = [30, 22, 15, 9].map((rad, i) =>
+        `<circle cx="${cx}" cy="${cy}" r="${rad}" fill="none" stroke="${i % 2 ? p[2] : ac}"
+          stroke-width="${n(1 + r[i] * 2.4)}" opacity=".85"/>`).join('') +
+        `<circle cx="${cx}" cy="${cy}" r="4" fill="${p[2]}"/>`;
+
+    } else if (cv.motif === 'bars') {
+      art = r.slice(0, 7).map((v, i) => {
+        const h = n(10 + v * 46), x = n(4 + i * 8.4);
+        return `<rect x="${x}" y="${n(64 - h)}" width="6" height="${h}" rx="1.5"
+          fill="${i === 3 ? ac : p[2]}" opacity="${i === 3 ? '1' : '.78'}"/>`;
+      }).join('');
+
+    } else if (cv.motif === 'wave') {
+      art = [0, 1, 2].map(i => {
+        const y = n(19 + i * 13 + r[i] * 7);
+        return `<path d="M-2 ${y} Q16 ${n(y - 8 - r[i + 3] * 9)} 32 ${y} T66 ${y}" fill="none"
+          stroke="${i === 1 ? ac : p[2]}" stroke-width="${n(2 + r[i + 6] * 2)}" opacity=".9"/>`;
+      }).join('');
+
+    } else if (cv.motif === 'prism') {
+      art = [0, 1, 2].map(i => {
+        const x = n(4 + r[i] * 26), y = n(6 + r[i + 3] * 20), s = n(24 + r[i + 6] * 22);
+        return `<path d="M${x} ${n(y + s)} L${n(x + s / 2)} ${y} L${n(x + s)} ${n(y + s)} Z"
+          fill="${i === 0 ? ac : p[2]}" opacity=".55"/>`;
+      }).join('');
+
+    } else if (cv.motif === 'grid') {
+      const cells = [];
+      for (let i = 0; i < 16; i++) {
+        const rad = n(1.6 + r[i % 10] * 4.4);
+        cells.push(`<circle cx="${n(11 + (i % 4) * 14)}" cy="${n(11 + ((i / 4) | 0) * 14)}"
+          r="${rad}" fill="${rad > 4.2 ? ac : p[2]}" opacity=".85"/>`);
+      }
+      art = cells.join('');
+
+    } else {
+      const cx = n(20 + r[0] * 26), cy = n(22 + r[1] * 16), rad = n(13 + r[2] * 12);
+      art = `<circle cx="${cx}" cy="${cy}" r="${rad}" fill="${ac}" opacity=".9"/>` +
+        `<rect x="-2" y="${n(cy + rad - 2)}" width="68" height="${n(2 + r[3] * 3)}" fill="${p[2]}" opacity=".8"/>` +
+        `<circle cx="${n(cx + rad * .9)}" cy="${n(cy - rad * .7)}" r="${n(2.5 + r[4] * 3)}" fill="${p[2]}"/>`;
+    }
+
+    return `<svg class="cover ${cls || ''}" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+      <defs><linearGradient id="${id}" x1="0" y1="0" x2="${n(r[7])}" y2="1">
+        <stop offset="0" stop-color="${p[0]}"/><stop offset="1" stop-color="${p[1]}"/>
+      </linearGradient></defs>
+      <rect width="64" height="64" fill="url(#${id})"/>${art}</svg>`;
+  }
+
+  /* A lightstick colour at low opacity. CSS cannot fade an arbitrary hex without
+     color-mix, and an act's identity has to reach a background wash as well as a
+     border — so the one place a colour is diluted is here, and every card that
+     wants one gets `--wash` beside `--accent`. */
+  function tint(hex, a) {
+    const h = String(hex || '').replace('#', '');
+    const v = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
+    const num = parseInt(v, 16);
+    if (v.length !== 6 || !isFinite(num)) return 'rgba(255,46,134,' + a + ')';
+    return 'rgba(' + ((num >> 16) & 255) + ',' + ((num >> 8) & 255) + ',' + (num & 255) + ',' + a + ')';
+  }
+
+  /* The two custom properties an act's identity travels on. Written once so
+     that a card, a chart rung and a schedule row can never drift apart. */
+  const skin = (color) => `--accent:${color};--wash:${tint(color, .20)}`;
+
   function statRows(t) {
     return KP.STATS.map(s => {
       const v = t.stats[s.k], p = t.potential[s.k];
@@ -98,7 +185,9 @@
       footer = injured
         ? `<div class="chip hot">Injured · ${t.statusWeeks}w left</div>`
         : group
-          ? `<div class="row"><span class="chip cool">${U.esc(group.name)}</span><span class="chip">${U.esc(t.position || '')}</span>${contract}${fame}</div>${focusGrid(t)}`
+          // The act's own colour on the chip, so a roster of twenty faces sorts
+          // itself into groups at a glance rather than by reading every card.
+          ? `<div class="row"><span class="chip act" style="${skin(group.color)}">${U.esc(group.name)}</span><span class="chip">${U.esc(t.position || '')}</span>${contract}${fame}</div>${focusGrid(t)}`
           : focusGrid(t) + `<div class="row" style="margin-top:8px">${fame}<span class="spacer"></span>
               <button class="btn btn-sm btn-cut" data-act="release" data-id="${t.id}"
                 title="Tear up the contract — no refund">Release</button></div>`;
@@ -297,10 +386,15 @@
       const rel = g.active;
       const row = (st.chart || []).find(r => r.mine && r.groupId === g.id);
       const rank = row ? row.rank : '—';
-      return `<div class="card group-card" style="--accent:${g.color}">
-        <div class="eyebrow">Promoting · week ${rel.week}/${rel.promoWeeks}</div>
-        <h3 style="font-size:19px;margin:6px 0 2px">${U.esc(rel.title)}</h3>
-        <div class="group-kr">${U.esc(g.name)} · ${U.esc(KP.concept(rel.concept).name)}</div>
+      return `<div class="card group-card" style="${skin(g.color)}">
+        <div class="now-playing">
+          ${coverArt(KP.relCover(g, rel), 'lg')}
+          <div>
+            <div class="eyebrow">Promoting · week ${rel.week}/${rel.promoWeeks}</div>
+            <h3 style="font-size:19px;margin:6px 0 2px">${U.esc(rel.title)}</h3>
+            <div class="group-kr">${U.esc(g.name)} · ${U.esc(KP.concept(rel.concept).name)}</div>
+          </div>
+        </div>
         <div class="kv">
           <div><b>${rank === 1 ? '🏆 #1' : '#' + rank}</b><span>This week</span></div>
           <div><b>#${rel.peak}</b><span>Peak</span></div>
@@ -557,16 +651,25 @@
         U.esc((m.position || '').replace('Main ', ''))}</i>
     </div>`).join('');
 
+    // The discography, with its jackets. A row that is only a peak and a number
+    // reads as a spreadsheet; the same row with the sleeve beside it reads as a
+    // shelf, which is what a discography is.
     const disc = g.releases.length ? `<div class="disc">${g.releases.slice(0, 5).map(r =>
-      `<div class="disc-row">
+      `<div class="disc-row has-art">
+          ${coverArt(KP.relCover(g, r), 'xs')}
           <span class="pk ${r.peak === 1 ? 'gold' : ''}">#${r.peak}</span>
           <span>${U.esc(r.title)}</span>
           <span class="mono tiny muted">${U.num(r.sales)} sold</span>
           <span class="mono tiny ${r.wins ? 'gold' : 'muted'}">${r.wins}🏆</span>
         </div>`).join('')}</div>` : `<p class="tiny muted">No releases yet.</p>`;
 
-    return `<article class="card group-card ${unit ? 'is-unit' : ''}" style="--accent:${g.color}">
+    // The act's own face on its own card: whatever it is putting out right now,
+    // or the last thing it did.
+    const front = g.active || g.releases[0] || null;
+
+    return `<article class="card group-card ${unit ? 'is-unit' : ''}" style="${skin(g.color)}">
         <div class="group-head">
+          ${front ? coverArt(KP.relCover(g, front), 'md') : ''}
           <div>
             <div class="group-name">${U.esc(g.name)}</div>
             <div class="group-kr">${unit && spec
@@ -704,7 +807,7 @@
               : late ? 'Too late for a refund — pulling out now costs reputation'
                 : 'Cancel · ' + U.money(Math.round(b.fee * B.cancelBack)) + ' recovered'}">✕</button>`;
         }).join('');
-        return `<div class="sw-row" style="--accent:${g.color}">
+        return `<div class="sw-row" style="${skin(g.color)}">
           <span class="sw-g" title="${U.esc(g.name)}">${U.esc(g.name)}</span>
           <div class="row">
             ${chips || '<span class="tiny muted">Nothing booked</span>'}
@@ -735,6 +838,79 @@
     return head + summary + `<div style="margin-top:16px">${weeks.join('')}</div>`;
   }
 
+  /* How a record prints itself. The only thing this screen reads off an entry
+     it does not otherwise understand, which is why `fmt` is a data field on
+     KP.recordKinds rather than a switch keyed to the record's name. */
+  function recordValue(spec, v) {
+    if (spec.fmt === 'money') return U.money(v);
+    if (spec.fmt === 'weeks') return v + ' week' + (v === 1 ? '' : 's');
+    if (spec.fmt === 'pts') return v.toFixed ? v.toFixed(0) + ' pts' : v + ' pts';
+    return U.num(v);
+  }
+
+  /* The hall. Ten high-water marks, and the empty ones are shown rather than
+     hidden: a record nobody has set yet is a thing to go and do, and a hall that
+     grows a row every time you break one is a hall that hides what is missing. */
+  function recordsCard(st) {
+    const set = KP.recordsSet(st);
+    const rows = KP.recordsOf(st).map(({ spec, rec }) => `<div class="rec ${rec ? '' : 'is-empty'}">
+      <span class="rec-ic">${U.esc(spec.ic)}</span>
+      <div class="rec-nm">${U.esc(spec.name)}<i>${U.esc(spec.desc)}</i></div>
+      <div class="rec-v">${rec
+        ? `<b>${U.esc(recordValue(spec, rec.v))}</b>
+           <i>${U.esc(rec.by)}${rec.sub ? ' · ' + U.esc(rec.sub) : ''} · Y${rec.y} W${rec.w}</i>`
+        : `<b class="muted">—</b><i>not set</i>`}</div>
+    </div>`).join('');
+
+    return `<div class="sec-head" style="margin-top:28px">
+      <h2>Hall of records</h2><span class="kr">기록실</span>
+      <p>${set} of ${KP.recordKinds.length} set</p></div>
+      <div class="card"><div class="recs">${rows}</div>
+        <p class="tiny muted" style="margin:14px 0 0">Every line here is a high-water mark for the whole run:
+          the week it happened, who did it, and nothing about the week it was beaten in. Nothing is ever taken
+          off this board — a record you no longer hold is a record somebody in this building still set.</p>
+      </div>`;
+  }
+
+  /* One year, as a card: the numbers first, then whatever it won. The two are
+     stored apart — a year with nothing on the ballot has a review and no
+     ceremony — so the card renders whichever of them exists. */
+  function yearCard(st, y) {
+    const rev = KP.reviewOf(st, y);
+    const aw = st.awards.find(a => a.y === y);
+    const s = rev ? rev.stats : null;
+    const cal = (rev && rev.calendarYear) || (aw && aw.calendarYear) || 0;
+
+    const nums = !rev ? '' : `<div class="kv" style="margin:10px 0 0">
+      <div><b>${s.releases}</b><span>Releases</span></div>
+      <div><b class="${s.no1 ? 'gold' : ''}">${s.no1}</b><span>#1 singles</span></div>
+      <div><b>${U.num(rev.cp)}</b><span>Chart points</span></div>
+      <div><b>${U.num(rev.sales)}</b><span>Albums</span></div>
+      <div><b>${U.num(rev.fansEnd)}</b><span>Fans at year end</span></div>
+      <div><b>${U.money(rev.cash)}</b><span>Cash</span></div>
+    </div>`;
+
+    const prizes = !aw ? `<p class="tiny muted" style="margin:10px 0 0">No ceremony — nothing charted far
+      enough to reach a ballot.</p>`
+      : `<div class="disc" style="margin-top:10px">${aw.results.map(r => `<div class="disc-row">
+          <span class="pk ${r.mine ? 'gold' : ''}">${U.esc(r.ic)}</span>
+          <span>${U.esc(r.winner)}${r.by ? ' <span class="muted">— ' + U.esc(r.by) + '</span>' : ''}</span>
+          <span class="mono tiny muted">${U.esc(r.name)}</span>
+          <span class="mono tiny ${r.mine ? 'gold' : 'muted'}">${r.mine ? 'YOURS' : ''}</span>
+        </div>`).join('')}</div>`;
+
+    return `<div class="card" style="margin-bottom:10px">
+      <div class="sw-head" style="border:0;padding:0;margin:0">
+        <b class="mono">Year ${y}${cal ? ' · ' + cal : ''}</b>
+        ${rev && rev.best ? `<span class="chip cool">🎵 ${U.esc(rev.best.title)}</span>` : ''}
+        <span class="spacer"></span>
+        ${rev ? `<button class="btn btn-sm" data-act="open-review" data-y="${y}">The year in review</button>` : ''}
+      </div>
+      ${nums}
+      ${prizes}
+    </div>`;
+  }
+
   function chartTab(st) {
     const s = KP.seasonNow(st);
     const head = `<div class="sec-head"><h2>Weekly chart</h2><span class="kr">주간 차트</span>
@@ -742,35 +918,41 @@
       <span class="spacer"></span>
       <span class="chip ${s.field > 1 ? 'hot' : 'cool'}">${U.esc(s.name)} · rivals ×${s.field.toFixed(2)}</span></div>`;
 
-    // Every ceremony the run has held, newest first. This is the only permanent
-    // record of a chart year anywhere in the game, so it lives next to the chart.
-    const hist = !st.awards.length ? '' : `<div class="sec-head" style="margin-top:28px">
-      <h2>Year-end honours</h2><span class="kr">시상식</span>
-      <p>${st.awards.length} year${st.awards.length === 1 ? '' : 's'} on record</p></div>
-      ${st.awards.map(a => `<div class="card" style="margin-bottom:10px">
-        <div class="eyebrow">Year ${a.y}${a.calendarYear ? ' · ' + a.calendarYear : ''}</div>
-        <div class="disc" style="margin-top:8px">${a.results.map(r => `<div class="disc-row">
-          <span class="pk ${r.mine ? 'gold' : ''}">${U.esc(r.ic)}</span>
-          <span>${U.esc(r.winner)}${r.by ? ' <span class="muted">— ' + U.esc(r.by) + '</span>' : ''}</span>
-          <span class="mono tiny muted">${U.esc(r.name)}</span>
-          <span class="mono tiny ${r.mine ? 'gold' : 'muted'}">${r.mine ? 'YOURS' : ''}</span>
-        </div>`).join('')}</div></div>`).join('')}`;
+    // Every year the run has finished, newest first. This tab is the game's
+    // memory: nothing else anywhere keeps a chart year after the rollover.
+    const years = [];
+    (st.reviews || []).forEach(r => { if (years.indexOf(r.y) < 0) years.push(r.y); });
+    st.awards.forEach(a => { if (years.indexOf(a.y) < 0) years.push(a.y); });
+    years.sort((a, b) => b - a);
+    const hist = !years.length ? '' : `<div class="sec-head" style="margin-top:28px">
+      <h2>The years</h2><span class="kr">연혁</span>
+      <p>${years.length} year${years.length === 1 ? '' : 's'} on record</p></div>
+      ${years.map(y => yearCard(st, y)).join('')}`;
+
+    const tail = recordsCard(st) + hist;
 
     if (!st.chart || !st.chart.length) {
-      return head + `<div class="empty"><b>Chart not published yet</b>Advance a week to see where the market stands.</div>` + hist;
+      return head + `<div class="empty"><b>Chart not published yet</b>Advance a week to see where the market stands.</div>` + tail;
     }
     const rows = st.chart.slice(0, 20).map(r => {
       // A song with an agency behind it says so — the rest of the ladder is the
-      // anonymous market, and the difference is the whole of this sprint.
+      // anonymous market, and the difference is the whole of Sprint 3. What is
+      // new here is that all three kinds now have a face: the sleeve is derived
+      // from the song, so the ladder is covered end to end rather than only the
+      // rows the game keeps records for.
       const act = r.rid ? KP.rivalAct(st, r.rid) : null;
       const by = act ? ' · ' + KP.rivalSpec(act.r).name : '';
-      return `<div class="rung ${r.mine ? 'mine' : ''} ${r.rank === 1 ? 'top1' : ''}">
+      const g = r.mine ? st.groups.find(x => x.id === r.groupId) : null;
+      const color = g ? g.color : act ? KP.rivalSpec(act.r).color : '';
+      return `<div class="rung ${r.mine ? 'mine' : ''} ${r.rank === 1 ? 'top1' : ''}"
+        ${color ? `style="${skin(color)}"` : ''}>
       <div class="rk">${r.rank}</div>
+      ${coverArt(KP.rowCover(st, r), 'sm')}
       <div><div class="ttl">${U.esc(r.title)}</div><div class="art">${U.esc(r.artist)}${U.esc(by)}</div></div>
       <div class="pts">${r.points.toFixed(1)}</div>
     </div>`;
     }).join('');
-    return head + `<div class="card"><div class="ladder">${rows}</div></div>` + hist;
+    return head + `<div class="card"><div class="ladder">${rows}</div></div>` + tail;
   }
 
   /* ------------------------------ the rivals -------------------------------
@@ -909,7 +1091,7 @@
         </div>`;
       }).join('');
 
-      return `<article class="card group-card" style="--accent:${sp.color}">
+      return `<article class="card group-card" style="${skin(sp.color)}">
         <div class="group-head">
           <div>
             <div class="group-name">${U.esc(sp.name)}</div>
@@ -980,7 +1162,7 @@
     const target = KP.engine.intlTarget(st, g);
     const quiet = g.lastReleaseAbs == null ? null : KP.absWeek(st) - g.lastReleaseAbs;
 
-    return `<article class="card group-card" style="--accent:${g.color}">
+    return `<article class="card group-card" style="${skin(g.color)}">
       <div class="group-head">
         <div>
           <div class="group-name">${U.esc(g.name)}</div>
@@ -1379,9 +1561,18 @@
 
       <div class="wiz-step">
         <span class="eyebrow">Title track</span>
-        <div class="row">
-          <input class="text-in" style="flex:1;min-width:200px" data-act="plan-title" value="${U.esc(p.title)}" maxlength="26">
-          <button class="btn" data-act="plan-reroll">Suggest another</button>
+        <div class="row" style="align-items:stretch">
+          <!-- The sleeve is a pure function of the title, the concept and the
+               act, so it is already decided before the song is: this is the
+               real one, not a mock-up of it. -->
+          ${coverArt(KP.songCover({ mine: true, title: p.title, concept: p.concept, color: g.color, groupId: g.id }), 'lg')}
+          <div class="grid" style="flex:1;min-width:200px;gap:8px;align-content:center">
+            <input class="text-in" data-act="plan-title" value="${U.esc(p.title)}" maxlength="26">
+            <div class="row">
+              <button class="btn btn-sm" data-act="plan-reroll">Suggest another</button>
+              <span class="tiny muted">${U.esc(KP.concept(p.concept).name)} sleeve</span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1689,6 +1880,120 @@
     `);
   };
 
+  /* ---------------------------- the year in review -------------------------
+     The scrapbook, and the one screen in the game that looks backwards. It
+     opens before the ceremony because the two answer different questions — this
+     is what you did, the ceremony is what it won — and it reads a record
+     E.runReview stored rather than recomputing anything: st.yearbook was wiped
+     one line after that record was written and there is nothing left to derive
+     a year from.
+
+     The headline is the one thing built here rather than stored. Which of a
+     year's numbers is THE number is a reading of the year and belongs on the
+     screen that shows it, on the same terms KP.fanMods is derived in state.js
+     and printed in this file. */
+  function reviewHeadline(rev) {
+    const s = rev.stats;
+    const w = rev.no1Weeks || 0;
+    if (!rev.groups && !s.debuts) return 'A year spent building. Nobody debuted, and nobody had to.';
+    if (!s.releases) return 'A year with nothing out. The fandom had nothing to talk about, and said so.';
+    if (s.no1 >= 4) return s.no1 + ' singles went to number one. That is not a good year, that is the year an agency is remembered for.';
+    if (w >= 8) return 'You held the top of the chart for ' + w + ' weeks of the year. Everybody else was working around you.';
+    if (s.no1 >= 1) return 'A year with a number one in it — which is the only kind of year that changes what next year can reach.';
+    if (s.departures > 0 && s.departures >= s.debuts) return 'A year of goodbyes. More people left the building than came into it.';
+    if (s.lives + s.tourLegs >= 6) return 'A year on the road. The rooms were the point, and the rooms were full.';
+    if (s.releases >= 3) return 'A busy year. ' + s.releases + ' campaigns, and the chart never quite gave you the week you wanted.';
+    return 'A working year. Nothing broke, nothing burned, and the doors are still open.';
+  }
+
+  ui.openReview = function (y) {
+    ui.review = y;
+    ui.drawReview();
+  };
+
+  ui.drawReview = function () {
+    const st = KP.state;
+    const rev = KP.reviewOf(st, ui.review);
+    if (!rev) return ui.closeModal();
+    const s = rev.stats;
+    const ceremony = st.pendingAwards === rev.y;
+
+    const best = rev.best ? `<div class="rev-song">
+      ${coverArt(KP.songCover({
+      mine: true, title: rev.best.title, concept: rev.best.concept,
+      color: rev.best.color, groupId: rev.best.groupId
+    }), 'xl')}
+      <div>
+        <span class="eyebrow">The year's own song</span>
+        <h3 style="font-size:22px;margin:6px 0 2px">${U.esc(rev.best.title)}</h3>
+        <div class="group-kr" style="color:${U.esc(rev.best.color || '#B78CFF')}">${U.esc(rev.best.act)}</div>
+        <p class="tiny muted" style="margin:10px 0 0">Peak #${rev.best.peak} · ${rev.best.weeks}
+          week${rev.best.weeks === 1 ? '' : 's'} on the chart · ${U.num(rev.best.cp)} points of the year's
+          ${U.num(rev.cp)}.</p>
+      </div>
+    </div>` : `<p class="tiny muted" style="margin:0 0 14px">Nothing of yours charted this year, so there is no
+      song to put at the top of the page. That is a sentence worth reading again next December.</p>`;
+
+    const table = rev.table.length ? `<div class="wiz-step">
+      <span class="eyebrow">Most weeks on the chart · all ${rev.acts} acts</span>
+      <div class="disc" style="margin-top:0">${rev.table.map(t => `<div class="disc-row">
+        <span class="pk ${t.mine ? 'gold' : ''}">${t.rank}</span>
+        <span>${U.esc(t.name)}${t.mine ? ' <span class="muted tiny">yours</span>' : ''}</span>
+        <span class="mono tiny muted">${U.num(t.cp)} pts</span>
+        <span class="mono tiny ${t.no1 ? 'gold' : 'muted'}">${t.no1}🏆</span>
+      </div>`).join('')}</div>
+      <p class="tiny muted" style="margin:8px 2px 0">Chart points are weeks charting, rank-weighted — so a
+        market name that is really a label with seven releases a year outranks an agency that had the best
+        year of its life. The ceremony discounts exactly that; this table does not.</p>
+    </div>` : '';
+
+    ui.modal(`
+      <div class="modal-head">
+        <div><div class="kr">${rev.calendarYear || ''}년 결산</div>
+          <h3>Year ${rev.y} in review</h3></div>
+        <button class="modal-close" data-act="modal-close">✕</button>
+      </div>
+      <p class="muted" style="margin:0 0 16px">${U.esc(reviewHeadline(rev))}</p>
+
+      ${best}
+
+      <div class="est g3">
+        <div><b>${s.releases}</b><span>Releases</span></div>
+        <div><b class="${s.no1 ? 'gold' : ''}">${s.no1}</b><span>#1 singles</span></div>
+        <div><b class="${s.wins ? 'gold' : ''}">${s.wins}</b><span>Show wins</span></div>
+        <div><b class="${rev.no1Weeks ? 'gold' : ''}">${rev.no1Weeks || 0}</b><span>Weeks at #1</span></div>
+        <div><b>${U.num(rev.cp)}</b><span>Chart points</span></div>
+        <div><b>${U.num(rev.sales)}</b><span>Albums sold</span></div>
+      </div>
+
+      <div class="est g3" style="margin-top:10px">
+        <div><b>${U.num(rev.fans)}</b><span>New fans</span></div>
+        <div><b>${s.stages}</b><span>Stages</span></div>
+        <div><b>${s.varietyShows}</b><span>Variety</span></div>
+        <div><b>${s.lives + s.tourLegs}</b><span>Shows played</span></div>
+        <div><b>${U.num(s.tickets)}</b><span>Tickets</span></div>
+        <div><b class="${s.departures ? 'neg' : ''}">${s.departures}</b><span>Departures</span></div>
+      </div>
+
+      ${table}
+
+      <div class="est">
+        <div><b>${U.num(rev.fansEnd)}</b><span>Fans at year end</span></div>
+        <div><b class="${rev.cash < 0 ? 'neg' : ''}">${U.money(rev.cash)}</b><span>In the bank</span></div>
+        <div><b>${rev.standing}</b><span>Standing</span></div>
+        <div><b>${rev.groups}${rev.units ? ' + ' + rev.units : ''}</b><span>Acts${rev.units ? ' + units' : ''}</span></div>
+        <div><b>${s.debuts}</b><span>Debuted this year</span></div>
+      </div>
+
+      <div class="modal-foot">
+        <span class="tiny muted">Every year the run finishes keeps a page like this one, on the Chart tab,
+          for as long as the save lives.</span>
+        <span class="spacer"></span>
+        <button class="btn ${ceremony ? 'btn-primary' : ''}" data-act="review-next">${ceremony
+        ? 'And now the ceremony →' : 'Close'}</button>
+      </div>`);
+  };
+
   /* ------------------------------- the ceremony ---------------------------- */
   /* Not locked: the player is allowed to close it. main.js therefore opens it
      after ui.render() and only when the run is still alive — a dead run outranks
@@ -1700,14 +2005,29 @@
     if (!rec) return;
     const mine = rec.results.filter(r => r.mine);
 
-    // Gold on a trophy is the one thing --gold was reserved for.
-    const rows = rec.results.map(r => `<div class="opt ${r.mine ? 'is-on' : ''}">
+    // Gold on a trophy is the one thing --gold was reserved for. Song of the
+    // Year gets its sleeve: it is the only prize awarded to an object rather
+    // than to an act, and the object has a face.
+    const rows = rec.results.map(r => {
+      const prize = KP.prize(r.k);
+      // Keyed off the prize's pool rather than off whether the record happens to
+      // carry a concept: only our own songs are stored with one, and a list where
+      // half the rows have a jacket is worse than one where none of them do.
+      const art = prize && prize.pool === 'songs'
+        ? coverArt(KP.songCover({
+          mine: !!r.mine, title: r.winner, artist: r.by,
+          concept: r.concept, color: r.color, groupId: r.groupId
+        }), 'sm')
+        : '';
+      return `<div class="opt ${r.mine ? 'is-on' : ''} ${art ? 'has-art' : ''}">
+      ${art}
       <div><b>${r.mine ? '<span class="gold">' + U.esc(r.ic) + '</span> ' : U.esc(r.ic) + ' '}${U.esc(r.winner)}${r.by
-      ? ' <span class="muted">— ' + U.esc(r.by) + '</span>' : ''}</b>
+        ? ' <span class="muted">— ' + U.esc(r.by) + '</span>' : ''}</b>
         <small>${U.esc(r.name)} · ${U.esc(r.kr)} · ${U.esc(r.detail)}</small></div>
       <span class="q">${r.mine ? 'YOURS' : ''}</span>
       <span class="c mono">${r.score}</span>
-    </div>`).join('');
+    </div>`;
+    }).join('');
 
     ui.modal(`
       <div class="modal-head">
@@ -1730,6 +2050,7 @@
         <span class="tiny muted">Standing is what producers, broadcasters, venues and lenders read.
           Prestige is permanent, and caps at ${KP.awards.prestigeCap}.</span>
         <span class="spacer"></span>
+        ${KP.reviewOf(st, rec.y) ? `<button class="btn" data-act="open-review" data-y="${rec.y}">The year in review</button>` : ''}
         <button class="btn btn-primary" data-act="modal-close">Take the stage</button>
       </div>`);
   };

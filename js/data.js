@@ -70,7 +70,22 @@ KP.util = (function () {
     return h;
   }
 
-  return { clamp, rnd, irnd, pick, pickN, chance, gauss, uid, money, num, esc, hue };
+  /* FNV-1a, 32 bits unsigned. hue() above is deliberately left alone: it is
+     baked into two save back-fills (t.face, g.retireAbs) and widening it would
+     re-roll every portrait and every rival farewell in every existing file.
+     This is the wider hash everything NEW derives from — cover art needs far
+     more than 360 distinct values before two songs start looking alike. */
+  function hash(str) {
+    const s = String(str);
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619) >>> 0;
+    }
+    return h >>> 0;
+  }
+
+  return { clamp, rnd, irnd, pick, pickN, chance, gauss, uid, money, num, esc, hue, hash };
 })();
 
 /* ------------------------------ people names ----------------------------- */
@@ -158,21 +173,63 @@ KP.traits = [
 ];
 
 /* --------------------------------- concepts ------------------------------- */
-/* Weights don't need to sum to 1 — the engine normalises them. */
+/* Weights don't need to sum to 1 — the engine normalises them. `pal` names an
+   entry in KP.art.palettes and is what a concept LOOKS like: every sleeve for a
+   Dark Fantasy title track is cut from the same three colours, so a discography
+   reads as a run of eras rather than as ten random squares. */
 KP.concepts = [
-  { k: 'girlcrush', name: 'Girl Crush', kr: '걸크러쉬', w: { dance: 28, rap: 22, visual: 20, vocal: 18, charisma: 12 } },
-  { k: 'cute', name: 'Cute Pop', kr: '큐티', w: { vocal: 25, dance: 22, visual: 23, charisma: 18, variety: 12 } },
-  { k: 'fairy', name: 'Ethereal', kr: '요정', w: { vocal: 32, visual: 28, dance: 20, charisma: 20 } },
-  { k: 'y2k', name: 'Y2K Retro', kr: '와이투케이', w: { dance: 28, charisma: 22, visual: 22, vocal: 18, rap: 10 } },
-  { k: 'dark', name: 'Dark Fantasy', kr: '다크', w: { dance: 30, visual: 24, vocal: 22, rap: 14, charisma: 10 } },
-  { k: 'hiphop', name: 'Hip-Hop Swag', kr: '힙합', w: { rap: 38, dance: 26, charisma: 20, visual: 16 } },
-  { k: 'summer', name: 'Summer Fresh', kr: '여름', w: { dance: 26, vocal: 24, visual: 22, charisma: 18, variety: 10 } },
-  { k: 'youth', name: 'School Youth', kr: '청춘', w: { vocal: 26, dance: 24, charisma: 24, visual: 16, variety: 10 } },
-  { k: 'cyber', name: 'Cyber Punk', kr: '사이버', w: { dance: 30, visual: 26, rap: 20, vocal: 16, charisma: 8 } },
-  { k: 'ballad', name: 'Emotional', kr: '발라드', w: { vocal: 45, visual: 20, charisma: 20, dance: 15 } }
+  { k: 'girlcrush', name: 'Girl Crush', kr: '걸크러쉬', pal: 'ember', w: { dance: 28, rap: 22, visual: 20, vocal: 18, charisma: 12 } },
+  { k: 'cute', name: 'Cute Pop', kr: '큐티', pal: 'candy', w: { vocal: 25, dance: 22, visual: 23, charisma: 18, variety: 12 } },
+  { k: 'fairy', name: 'Ethereal', kr: '요정', pal: 'violet', w: { vocal: 32, visual: 28, dance: 20, charisma: 20 } },
+  { k: 'y2k', name: 'Y2K Retro', kr: '와이투케이', pal: 'gold', w: { dance: 28, charisma: 22, visual: 22, vocal: 18, rap: 10 } },
+  { k: 'dark', name: 'Dark Fantasy', kr: '다크', pal: 'noir', w: { dance: 30, visual: 24, vocal: 22, rap: 14, charisma: 10 } },
+  { k: 'hiphop', name: 'Hip-Hop Swag', kr: '힙합', pal: 'rust', w: { rap: 38, dance: 26, charisma: 20, visual: 16 } },
+  { k: 'summer', name: 'Summer Fresh', kr: '여름', pal: 'mint', w: { dance: 26, vocal: 24, visual: 22, charisma: 18, variety: 10 } },
+  { k: 'youth', name: 'School Youth', kr: '청춘', pal: 'blush', w: { vocal: 26, dance: 24, charisma: 24, visual: 16, variety: 10 } },
+  { k: 'cyber', name: 'Cyber Punk', kr: '사이버', pal: 'ice', w: { dance: 30, visual: 26, rap: 20, vocal: 16, charisma: 8 } },
+  { k: 'ballad', name: 'Emotional', kr: '발라드', pal: 'dusk', w: { vocal: 45, visual: 20, charisma: 20, dance: 15 } }
 ];
 
 KP.groupColors = ['#FF2E86', '#45E8FF', '#B78CFF', '#FFCB47', '#5BE7B0', '#FF7A45', '#7C9CFF', '#FF5CC8'];
+
+/* ============================== the sleeves ==============================
+   Every song in the game gets a cover, and not one byte of art ships with it:
+   a sleeve is three colours, a motif and ten numbers, all derived from the
+   song itself by KP.cover() in state.js and painted as inline SVG by ui.js.
+
+   Nothing about a cover is stored in the save. That is the whole design: a
+   sleeve is a pure function of (title, concept, act), so the same song wears
+   the same jacket in the discography, on the chart ladder, in the ceremony and
+   in a save file exported three builds ago — and re-skinning the entire
+   catalogue is an edit to this object rather than a migration.
+
+   The split between the two halves is the same one KP.traits has with the
+   engine: PALETTE IS MEANING, MOTIF IS IDENTITY. The palette comes from the
+   concept, so a Dark Fantasy era looks like a Dark Fantasy era across four
+   different groups; the motif comes from the hash, so two songs of the same
+   concept are still two different sleeves. Adding a palette is one entry here
+   plus one `pal` on a concept; adding a motif is one name here plus one branch
+   in ui.js's painter, exactly as a new trait effect is.
+
+   Each palette is [ground, ink, light]: the ground is a near-black the sleeve
+   sits on, the ink is the concept's own colour, and the light is what the
+   motif is drawn in. The group's lightstick colour rides on top as the accent,
+   which is what ties four sleeves together as one act's discography. */
+KP.art = {
+  palettes: {
+    ember: ['#2A0A18', '#FF2E86', '#FFC2DC'],
+    candy: ['#2B0A20', '#FF5CC8', '#FFD9F3'],
+    ice: ['#04202B', '#45E8FF', '#CFF6FF'],
+    violet: ['#170A2E', '#B78CFF', '#EADDFF'],
+    gold: ['#241704', '#FFCB47', '#FFF0C2'],
+    mint: ['#052318', '#5BE7B0', '#D5FFEE'],
+    dusk: ['#12132C', '#7C9CFF', '#DCE6FF'],
+    rust: ['#2A1206', '#FF7A45', '#FFDCC9'],
+    noir: ['#0B0B14', '#8E7FC4', '#D8D2EE'],
+    blush: ['#2A1418', '#FF9C8A', '#FFE1DA']
+  },
+  motifs: ['rings', 'bars', 'wave', 'prism', 'grid', 'orb']
+};
 
 /* --------------------------- comeback production -------------------------- */
 KP.tiers = {
@@ -339,6 +396,45 @@ KP.awards = {
       pool: 'acts', winners: 5, rep: 2.5, fansPct: .03, momentum: 8, prestige: 1 }
   ]
 };
+
+/* ============================== the record books ==========================
+   A run is fifty-two weeks times however many years it survives, and st.log
+   keeps three hundred lines of it. Everything else — the night the dome sold
+   out, the first week that shifted a million copies, the signature that cost
+   more than the building — is gone by the following spring.
+
+   A record is a high-water mark and nothing else: `E.record()` keeps the
+   larger of what is there and what just happened, stamps the week it happened
+   in, and never writes anything down twice. That is why every entry here is a
+   MAXIMUM — a "lowest" or a "best rank" would need its own comparison and a
+   different empty state, and one door is what keeps ten records from becoming
+   ten little systems.
+
+   `fmt` is how the hall prints it and the only thing ui.js reads off an entry
+   it does not otherwise understand. A new record is one entry here plus one
+   E.record() call at the place it happens. */
+KP.recordKinds = [
+  { k: 'agency', name: 'Largest agency', kr: '최대 팬덤', ic: '🏢', fmt: 'num',
+    desc: 'Every fan the building has held at once' },
+  { k: 'fandom', name: 'Largest fandom', kr: '최다 팬', ic: '💗', fmt: 'num',
+    desc: 'The biggest one act has ever got' },
+  { k: 'cash', name: 'Deepest pockets', kr: '최고 잔고', ic: '💰', fmt: 'money',
+    desc: 'The balance at its highest' },
+  { k: 'sales', name: 'Biggest first week', kr: '초동 최고', ic: '💿', fmt: 'num',
+    desc: 'Physical copies in the release week' },
+  { k: 'points', name: 'Biggest chart week', kr: '최고 주간', ic: '📈', fmt: 'pts',
+    desc: 'The most points one song has scored in a week' },
+  { k: 'reign', name: 'Longest reign', kr: '최장 1위', ic: '👑', fmt: 'weeks',
+    desc: 'Weeks at #1 in a single promotion run' },
+  { k: 'crowd', name: 'Biggest crowd', kr: '최다 관객', ic: '🎇', fmt: 'num',
+    desc: 'Seats sold on one night' },
+  { k: 'gate', name: 'Biggest gate', kr: '최고 매출', ic: '🎫', fmt: 'money',
+    desc: 'What one night took at the box office' },
+  { k: 'signature', name: 'Costliest signature', kr: '최고 재계약', ic: '✍️', fmt: 'money',
+    desc: 'The most ever paid to keep somebody' },
+  { k: 'chartYear', name: 'Best chart year', kr: '최고 연간', ic: '🏆', fmt: 'num',
+    desc: 'Chart points the agency scored in one year' }
+];
 
 /* ------------------------------ the schedule ------------------------------ */
 /* Promotion used to be an abstraction folded into the promo tier. Here it is a

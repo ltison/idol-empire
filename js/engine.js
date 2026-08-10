@@ -116,6 +116,40 @@
     return amount - cut;
   };
 
+  /* The single choke point for the counters, on exactly the terms E.earn is one
+     for money. st.stats is the career and st.statsY is the year in progress,
+     and they are the same fourteen numbers — written apart, the year-in-review
+     would start disagreeing with the career total it is a slice of the first
+     time somebody added a counter and updated one of them. */
+  function bumpStat(st, key, n) {
+    const d = n == null ? 1 : n;
+    st.stats[key] = (st.stats[key] || 0) + d;
+    st.statsY = st.statsY || KP.blankStats();
+    st.statsY[key] = (st.statsY[key] || 0) + d;
+  }
+  E.bumpStat = bumpStat;
+
+  /* ============================= the record books ==========================
+     A high-water mark, and the only thing that ever writes one. Everything is a
+     MAXIMUM (see the note on KP.recordKinds), so this is a comparison and a
+     stamp and nothing else — no history, no ties, no second place. A record
+     that is not beaten is not touched, which is what keeps ten records off the
+     weekly save-size bill.
+
+     Called from wherever the thing actually happens, the way E.ybAct is: a gate
+     is recorded in resolveLive because that is the only place a gate exists. */
+  E.record = function (st, key, value, by, sub) {
+    if (!KP.recordSpec(key)) return null;
+    const v = Math.round(value);
+    if (!isFinite(v) || v <= 0) return null;
+    st.records = st.records || {};
+    const cur = st.records[key];
+    if (cur && cur.v >= v) return null;
+    const rec = { v, by: String(by || ''), sub: String(sub || ''), y: st.year, w: st.week };
+    st.records[key] = rec;
+    return rec;
+  };
+
   /* ============================== the market =============================== */
 
   function ensureMarket(st) {
@@ -690,7 +724,7 @@
     rel.points = rel.basePoints;
     g.active = rel;
     g.lastReleaseAbs = KP.absWeek(st);
-    st.stats.releases++;
+    bumpStat(st, 'releases');
 
     // Physical sales land in release week — the fandom pre-ordered weeks ago, and
     // a loyal domestic fandom pre-ordered four copies each. The preview's own
@@ -703,6 +737,7 @@
     const yba = E.ybAct(st, g);      // Album of the Year is decided here
     yba.sales += units;
     yba.revenue += rev;
+    E.record(st, 'sales', units, g.name, title);
 
     KP.log('“' + title + '” is out. First-week albums: ' + U.num(units) + ' copies.', 'big');
     pushRecap(st, '💿', g.name + ' released “' + title + '” · ' + U.num(units) + ' albums', 'big');
@@ -721,6 +756,10 @@
     rel.pointWeeks += rel.points;
     if (rank <= 10) rel.weeksTop10++;
     if (rank <= 3) rel.weeksTop3++;
+    // The week's score, before the decay below spends it. A record is a thing
+    // that happened, so it is stamped where it happened rather than read back
+    // off an archive that only keeps the peak.
+    E.record(st, 'points', rel.points, g.name, rel.title);
 
     // Revenue and fans both key off chart points, not rank alone. The season's
     // audience rides on top of streaming only: the field decides where a song
@@ -756,7 +795,7 @@
 
     if (rank === 1) {
       rel.wins++;
-      st.stats.wins++;
+      bumpStat(st, 'wins');
       st.company.rep = U.clamp(st.company.rep + 2.5, 0, 100);
       g.momentum = U.clamp(g.momentum + 9, 0, 100);
       KP.log('🏆 ' + g.name + ' takes #1 with “' + rel.title + '”.', 'big');
@@ -782,7 +821,8 @@
         releasedY: rel.releasedY, releasedW: rel.releasedW,
         y: st.year, w: st.week
       });
-      if (rel.peak === 1) st.stats.no1++;
+      if (rel.peak === 1) bumpStat(st, 'no1');
+      E.record(st, 'reign', rel.wins, g.name, rel.title);
       g.momentum = U.clamp(g.momentum + (rel.peak <= 3 ? 18 : rel.peak <= 10 ? 8 : -6), 0, 100);
       // A run the fandom is proud of is a fandom that stays. Nothing here for a
       // quiet run: the dilution the promotion weeks already paid is the cost of
@@ -1133,7 +1173,7 @@
     bumpCast(st, g, cast, KP.bonds.together);
     payStamina(st, cast, show.stamina);
     g.stagesY++;
-    st.stats.stages++;
+    bumpStat(st, 'stages');
     // Best Performance is decided by the diary, and this is where it is written.
     const yba = E.ybAct(st, g);
     yba.stages++;
@@ -1170,7 +1210,7 @@
     bumpCast(st, g, cast, KP.bonds.together * (grade.k === 'flat' ? -1 : grade.k === 'viral' ? 2 : 1));
     payStamina(st, cast, show.stamina);
     g.varietyY++;
-    st.stats.varietyShows++;
+    bumpStat(st, 'varietyShows');
     // Entertainer of the Year reads both halves of this: how often you went out,
     // and how funny the person you sent actually was.
     const yba = E.ybAct(st, g);
@@ -1221,8 +1261,10 @@
     g.liveAbs[v.k] = b.absWeek;
     g.livesY++;
     g.ticketsY += sold;
-    st.stats.lives++;
-    st.stats.tickets += sold;
+    bumpStat(st, 'lives');
+    bumpStat(st, 'tickets', sold);
+    E.record(st, 'crowd', sold, g.name, v.name);
+    E.record(st, 'gate', gross, g.name, v.name);
     const yba = E.ybAct(st, g);
     yba.tickets += sold;
     yba.fans += gained;
@@ -1238,7 +1280,7 @@
       // counted for life, which is what raises the international target for good.
       g.tourLegs = (g.tourLegs || 0) + 1;
       g.toursY = (g.toursY || 0) + 1;
-      st.stats.tourLegs++;
+      bumpStat(st, 'tourLegs');
     }
     cast.forEach(m => {
       m.morale = U.clamp(m.morale + (grade === 'undersold' ? L.undersoldMorale : v.morale), 0, 100);
@@ -1284,6 +1326,9 @@
     st.groups.forEach(g => {
       g.stagesY = 0; g.varietyY = 0; g.livesY = 0; g.ticketsY = 0; g.toursY = 0;
     });
+    // The agency's own per-year column, on exactly the same terms as the
+    // per-group ones above. E.runReview must have already copied it.
+    st.statsY = KP.blankStats();
     st.yearbook = { y: st.year, acts: {}, songs: {} };
   };
 
@@ -1376,7 +1421,7 @@
       truth, sev, conf, read: U.chance(conf) ? truth : !truth,
       absWeek: KP.absWeek(st)
     };
-    st.stats.scandals++;
+    bumpStat(st, 'scandals');
     KP.log('⚠ ' + spec.name + ': a story about ' + member.name + ' (' + g.name +
       ') is running. The office needs an answer this week.', 'bad');
     pushRecap(st, spec.ic, spec.name + ' · ' + member.name, 'bad');
@@ -1739,7 +1784,7 @@
       const name = disbandGroup(st, g, reason);
       KP.log(name + ' has disbanded — nobody is left in the group.', 'bad');
       pushRecap(st, '💔', name + ' disbanded', 'bad');
-      st.stats.departures++;
+      bumpStat(st, 'departures');
       return { ok: true, disbanded: name };
     }
 
@@ -1754,7 +1799,7 @@
     bumpSenti(g, C.leaveSenti);
     st.company.rep = U.clamp(st.company.rep - C.leaveRep, 0, 100);
     g.momentum = U.clamp(g.momentum - 8, 0, 100);
-    st.stats.departures++;
+    bumpStat(st, 'departures');
     return { ok: true, lost, left: g.memberIds.length };
   };
 
@@ -1886,7 +1931,7 @@
       debut: { y: st.year, w: st.week }
     };
     st.groups.push(g);
-    st.stats.units++;
+    bumpStat(st, 'units');
     st.company.rep = U.clamp(st.company.rep + 1, 0, 100);
     // Being picked out of the line-up is a good week for the people picked.
     members.forEach(m => { m.morale = U.clamp(m.morale + 8, 0, 100); });
@@ -1941,7 +1986,8 @@
     t.morale = U.clamp(t.morale + C.renewMorale, 0, 100);
     const g = st.groups.find(x => x.id === t.groupId);
     if (g) { bumpLoyal(g, C.renewLoyal); bumpSenti(g, C.renewSenti); }
-    st.stats.renewals++;
+    bumpStat(st, 'renewals');
+    E.record(st, 'signature', cost, t.name, g ? g.name : '');
     KP.log(t.name + ' has re-signed for ' + years + ' more years · ' + U.money(cost) + '.', 'good');
     pushRecap(st, '✍️', t.name + ' re-signed · ' + years + ' years', 'good');
     return { ok: true, cost, years };
@@ -2107,7 +2153,7 @@
     });
 
     st.survival = null;
-    st.stats.shows++;
+    bumpStat(st, 'shows');
     if (!picked.length) {
       KP.log('The survival finals came and went without an offer from you.', 'bad');
     }
@@ -2379,10 +2425,16 @@
           cp: 0, peak: 99, weeks: 0, no1: 0, quality: 0
         };
         // Song of the Year is partly a craft award, and this is the only moment
-        // the song's quality is still reachable from a chart row.
+        // the song's quality is still reachable from a chart row. The concept
+        // and the colour ride along for the same reason and are kept only for
+        // our own songs: they are what KP.cover draws the sleeve from, and a
+        // year of rival titles carrying two dead fields each is save size spent
+        // on a jacket nothing ever prints.
         if (r.mine) {
           const g = st.groups.find(x => x.id === r.groupId);
           if (g && g.active && g.active.title === r.title) s.quality = g.active.quality;
+          if (g) { s.concept = (g.active && g.active.title === r.title) ? g.active.concept : g.concept; }
+          if (g) s.color = g.color;
         }
       }
       s.cp += w;
@@ -2409,6 +2461,132 @@
     let a = st.yearbook.acts[key];
     if (!a) a = st.yearbook.acts[key] = blankAct(g.name, true, g.id, g.debut ? g.debut.y : st.year);
     return a;
+  };
+
+  /* ============================ the year in review =========================
+     The ceremony judges the year; this remembers it. Same window as
+     E.runAwards — after the calendar has turned and before E.rollYear wipes the
+     accumulator — and for the same reason: st.yearbook is the only place a
+     chart year exists, and in one more line of nextWeek it will not.
+
+     Three rules it is built under:
+
+     - It runs UNCONDITIONALLY, where the ceremony returns early on an empty
+       ballot. A year with no releases in it is still a year the player spent —
+       signing, building, going broke slowly — and it is the year they most want
+       a page about.
+     - It records the year BEFORE the trophies are handed out, which is why
+       E.runReview is called first: the review is what you did, the ceremony is
+       what it won, and a review that already knew the answer would spoil the
+       modal that opens straight after it.
+     - It stores numbers, never sentences. Which of them makes a headline is a
+       reading of the year and belongs on the screen that shows it, the same way
+       KP.fanMods is derived here and printed there. */
+  E.runReview = function (st) {
+    const yb = st.yearbook;
+    const year = yb.y;
+    const acts = Object.keys(yb.acts).map(k => yb.acts[k]);
+    const ours = acts.filter(a => a.mine);
+    const cp = ours.reduce((s, a) => s + a.cp, 0);
+
+    // The chart year as a table, everybody's, because a year in which somebody
+    // else owned the chart is the most useful thing this page can say. The top
+    // five, and then OUR best act wherever it actually came — a scrapbook that
+    // can leave the reader off its own page is a scrapbook nobody believes.
+    //
+    // Why it usually does: an anonymous market name is a catalogue rather than
+    // an act. ~150 songs a year are shared between twenty-two of them, so each
+    // aggregates seven releases where the player aggregates two, and raw chart
+    // points rank a busy label above an agency that had the best year of its
+    // life. That is the same distortion KP.awards.rivalRateShare exists to
+    // discount, and it is why the tiles beside this table quote weeks at #1
+    // rather than a share of the field.
+    const ranked = acts.slice().sort((a, b) => b.cp - a.cp);
+    const row = (a, i) => ({ rank: i + 1, name: a.name, cp: Math.round(a.cp), no1: a.no1, mine: !!a.mine });
+    const table = ranked.slice(0, 5).map(row);
+    const mineAt = ranked.findIndex(a => a.mine);
+    if (mineAt >= 5) table.push(row(ranked[mineAt], mineAt));
+
+    // The year's own song, off the same ballot Song of the Year is read from,
+    // narrowed to ours: this is a scrapbook, not a second ceremony. The concept
+    // is resolved here because the yearbook keys songs by title and the sleeve
+    // is drawn from the concept — after the rollover the release is still in the
+    // discography, but only for as long as we are standing in this function.
+    const songs = Object.keys(yb.songs).map(k => yb.songs[k])
+      .filter(s => s.mine).sort((a, b) => b.cp - a.cp);
+    let best = null;
+    if (songs[0]) {
+      const s = songs[0];
+      best = {
+        title: s.title, act: s.act, groupId: s.groupId || null,
+        concept: s.concept || null, color: s.color || null,
+        cp: Math.round(s.cp), peak: s.peak, weeks: s.weeks
+      };
+    }
+
+    const rec = {
+      y: year,
+      calendarYear: st.calendarYear - 1,
+      stats: Object.assign({}, st.statsY),
+      cp: Math.round(cp),
+      fieldCp: Math.round(acts.reduce((s, a) => s + a.cp, 0)),
+      sales: Math.round(ours.reduce((s, a) => s + a.sales, 0)),
+      fans: Math.round(ours.reduce((s, a) => s + a.fans, 0)),
+      revenue: Math.round(ours.reduce((s, a) => s + a.revenue, 0)),
+      table, best,
+      acts: ranked.length,
+      // Weeks any song of ours spent at #1, which is a different year from the
+      // number of singles that reached it: one song holding for six weeks and
+      // six songs holding for one are both "six", and only one of them is a
+      // year the public remembers.
+      no1Weeks: ours.reduce((s, a) => s + a.no1, 0),
+      // Where the agency stood on the last night of the year. Read before the
+      // ceremony moves any of them, which is the honest reading of "the year".
+      fansEnd: KP.totalFans(st),
+      cash: Math.round(st.company.money),
+      rep: Math.round(st.company.rep),
+      standing: Math.round(KP.standing(st)),
+      prestige: st.company.prestige || 0,
+      groups: KP.mainGroups(st).length,
+      units: st.groups.length - KP.mainGroups(st).length,
+      trainees: st.trainees.filter(t => !t.groupId).length
+    };
+    st.reviews.unshift(rec);
+    while (st.reviews.length > KP.awards.historyYears) st.reviews.pop();
+    st.pendingReview = year;
+    // The one record that is about a year rather than a week, so it is restamped
+    // to the year it belongs to: the rollover has already moved the calendar on,
+    // and a chart year filed under the first week of the following January is a
+    // row that contradicts its own value. E.record returns the entry for exactly
+    // this — nothing else is allowed to reach into st.records.
+    const cr = E.record(st, 'chartYear', cp, st.company.name, '');
+    if (cr) { cr.y = year; cr.w = KP.WEEKS_PER_YEAR; }
+    return rec;
+  };
+
+  /* Claimed exactly once, the way a ceremony is — and separately, because the
+     two are independent: a year with nothing on the ballot has a review and no
+     ceremony at all. */
+  E.claimReview = function (st) {
+    const y = st.pendingReview;
+    if (y == null) return null;
+    st.pendingReview = null;
+    return y;
+  };
+
+  /* The three records that are a LEVEL rather than an event, sampled once a
+     week as the last thing the tick does — see step 7b for why it has to be
+     last. Everything else in KP.recordKinds is stamped where it happens,
+     because a gate and a first week only exist for one line of one function. */
+  E.recordWeek = function (st) {
+    // No `sub` on these two: the entry already carries the week it was set in,
+    // and a row that prints "STARLINE · Y3 W17 · Y3 W17" is one label doing the
+    // job twice.
+    E.record(st, 'agency', KP.totalFans(st), st.company.name, '');
+    E.record(st, 'cash', st.company.money, st.company.name, '');
+    let top = null;
+    st.groups.forEach(g => { if (!top || g.fans > top.fans) top = g; });
+    if (top) E.record(st, 'fandom', top.fans, top.name, top.fandom || '');
   };
 
   /* The ceremony. Called at the rollover, BEFORE E.rollYear wipes the book, and
@@ -2493,6 +2671,11 @@
           winner: isSong ? w.title : w.name,
           by: isSong ? w.act : null,
           groupId: w.groupId || null,
+          // What the sleeve is drawn from, for the one prize that is a song.
+          // Stored on the result rather than looked up on the night the modal
+          // opens: st.awards outlives the release it is about by twenty years.
+          concept: isSong ? (w.concept || null) : null,
+          color: isSong ? (w.color || null) : null,
           mine: !!w.mine,
           detail: isSong
             ? 'peak #' + w.peak + ' · ' + w.weeks + ' weeks charting'
@@ -2744,8 +2927,12 @@
       st.year++;
       st.calendarYear++;
       KP.log('— Year ' + st.year + ' begins —', 'big');
-      // Judge the year that just ended, THEN wipe the book. Reversing these two
-      // lines silently awards an empty year, every year.
+      // Remember the year, judge the year that just ended, THEN wipe the book.
+      // All three read st.yearbook and the third one empties it, so the order is
+      // load-bearing: reversing the last two silently awards an empty year,
+      // every year, and running the review after the ceremony would hand it a
+      // reputation and a fandom the trophies had already moved.
+      E.runReview(st);
       E.runAwards(st);
       E.rollYear(st);
     }
@@ -2865,6 +3052,14 @@
       E.rivalPoach(st);
       KP.refreshScouts();
     }
+
+    // 7b. the record books, and deliberately the LAST thing that reads the week.
+    //     A high-water mark has to be a number the player could have seen: a
+    //     fancam in step 6 adds fans and a scandal takes them away, so a level
+    //     sampled before the events is a peak that existed for nobody. Taking it
+    //     here means "the biggest it ever was on a Sunday night", which is the
+    //     only reading the screen can honestly print.
+    E.recordWeek(st);
 
     // 8. fail state — two ways to lose, and they are not the same failure. The
     //    guard keeps 5b's more specific reason rather than overwriting it.
@@ -3007,6 +3202,7 @@
     E.assignPositions(st, members);
     st.groups.push(g);
     st.company.rep = U.clamp(st.company.rep + 3, 0, 100);
+    bumpStat(st, 'debuts');
 
     KP.log('🎉 ' + g.name + ' debuts! Fandom name: ' + g.fandom + '.', 'big');
     return { ok: true, group: g };
