@@ -1239,7 +1239,9 @@
     const members = w.picked.map(id => st.trainees.find(t => t.id === id));
 
     const score = members.length ? KP.engine.groupScore(members, w.concept) : 0;
-    const canGo = members.length >= 3 && st.company.money >= KP.costs.debutShowcase && w.name.trim().length > 0;
+    const nameTaken = st.groups.some(g => g.name === w.name.trim());
+    const canGo = members.length >= 3 && st.company.money >= KP.costs.debutShowcase
+      && w.name.trim().length > 0 && !nameTaken;
 
     const picks = pool.map(t => `<div class="card sel-idol ${w.picked.includes(t.id) ? 'is-on' : ''}"
         data-act="wiz-pick" data-id="${t.id}" style="padding:12px">
@@ -1297,7 +1299,9 @@
       </div>
 
       <div class="modal-foot">
-        <span class="tiny muted">Positions are assigned automatically from stats and age.</span>
+        <span class="tiny ${nameTaken ? 'neg' : 'muted'}">${nameTaken
+          ? 'You already have an act called that.'
+          : 'Positions are assigned automatically from stats and age.'}</span>
         <span class="spacer"></span>
         <button class="btn" data-act="modal-close">Cancel</button>
         <button class="btn btn-primary" data-act="wiz-debut" ${canGo ? '' : 'disabled'}>Debut them</button>

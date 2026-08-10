@@ -2950,6 +2950,13 @@
     // The wizard's disabled state is one render stale — validate where it is authoritative.
     const name = String(opts.name || '').trim();
     if (!name) return { ok: false, msg: 'Your group needs a name.' };
+    // The same rule E.formUnit holds, and for more than tidiness: the market and
+    // the agencies both generate names AROUND st.groups, the yearbook keys acts
+    // by id but prints them by name, and two acts called the same thing on one
+    // chart is a ladder the player cannot read.
+    if (st.groups.some(g => g.name === name)) {
+      return { ok: false, msg: 'You already have an act called that.' };
+    }
     if (st.company.money < KP.costs.debutShowcase) return { ok: false, msg: 'A debut showcase costs ' + U.money(KP.costs.debutShowcase) + '.' };
 
     st.company.money -= KP.costs.debutShowcase;
