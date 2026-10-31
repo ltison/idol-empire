@@ -466,6 +466,11 @@ to change the state shape, and picking the wrong one breaks old files:
   (`songs[k].concept` / `.color`) are absent on an older file and the sleeve falls back to
   the hash palette — the same jacket the anonymous half of the ladder has always worn.
 
+The first-run guide adds one field, `st.guideOff` (`false`): the player closed it. Every
+step's progress is *derived* from the save by `KP.guideSteps()` rather than stored, so an
+older file opens with the guide showing exactly the steps it has not done yet, and a run
+that has already released a song never sees it at all.
+
 A record with two calendars on it, which nobody should tidy: on `g.releases[]`, **`y`/`w`
 mean the week promotions *wrapped*** (they always did, and 4–7 weeks after the fact),
 while **`releasedY`/`releasedW` mean the week the song came *out*** (`g.active` carries a
