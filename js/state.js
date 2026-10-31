@@ -103,15 +103,20 @@
   };
 
   /* The stat a training week is best spent on: the lowest one that still has
-     room under its ceiling. A stat already at potential is not "weak", it is
-     finished — pointing the player at it would spend a week on nothing. Null
-     when every stat has topped out. */
+     real room under its ceiling. A stat within `minGap` of its potential is
+     not "weak", it is nearly finished — a week on it buys a fraction of a
+     point. Compared on the rounded value the card prints, so two stats that
+     both read 7 are a tie, and a tie goes to the one with more room to grow.
+     Null when nothing has room left. */
   KP.weakestStat = function (t) {
-    let best = null;
+    let best = null, bestV = 0, bestGap = 0;
     KP.STATS.forEach(s => {
-      const v = t.stats[s.k];
-      if (t.potential[s.k] - v < 1) return;
-      if (!best || v < t.stats[best]) best = s.k;
+      const v = Math.round(t.stats[s.k]);
+      const gap = t.potential[s.k] - t.stats[s.k];
+      if (gap < KP.trainHint.minGap) return;
+      if (best === null || v < bestV || (v === bestV && gap > bestGap)) {
+        best = s.k; bestV = v; bestGap = gap;
+      }
     });
     return best;
   };

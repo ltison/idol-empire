@@ -146,7 +146,9 @@
   function focusGrid(t) {
     // The weakest stat with room left is marked on its own button, so the most
     // common training call is read off the button rather than the bars above it.
-    const weak = KP.weakestStat(t);
+    // An exhausted idol's card already says "rest them"; an arrow pointing at a
+    // stat would be the opposite advice on the same card.
+    const weak = t.stamina < KP.trainHint.exhausted ? null : KP.weakestStat(t);
     return `<div class="focus-grid">` + FOCI.map(f => {
       const isWeak = f.k === weak;
       const tip = isWeak
@@ -218,7 +220,7 @@
       <div>${statRows(t)}</div>
       ${vitals(t)}
       <div class="row">
-        ${t.stamina < 20 && t.status !== 'injured' ? '<span class="chip hot">Exhausted — rest them</span>' : ''}
+        ${t.stamina < KP.trainHint.exhausted && t.status !== 'injured' ? '<span class="chip hot">Exhausted — rest them</span>' : ''}
         ${traitChips(t)}
       </div>
       ${footer}
