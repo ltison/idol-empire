@@ -39,6 +39,7 @@
     KP.save();
     ui.tab = 'dash';
     showGame();
+    ui.openWelcome();
   });
 
   $('#btn-continue').addEventListener('click', () => {
@@ -460,6 +461,20 @@
     'menu-import'() { pickSaveFile(); },
     'menu-quit'() { KP.wipe(); ui.closeModal(); showStart(); },
     'modal-close'() { ui.closeModal(); },
+    goto(d) { ui.closeModal(); ui.tab = d.tab; ui.render(); },
+    'guide-hide'() {
+      KP.state.guideOff = true;
+      ui.render();
+      KP.save();
+      ui.toast('Guide hidden — the ⋯ menu brings it back.');
+    },
+    'guide-show'() {
+      KP.state.guideOff = false;
+      ui.tab = 'dash';
+      ui.render();
+      KP.save();
+      ui.openWelcome();
+    },
     'modal-bg'(d, e) { if (e.target.classList.contains('modal-bg')) ui.closeModal(); }
   };
 

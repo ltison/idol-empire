@@ -161,6 +161,21 @@ KP.STATS = [
    stamina the card says "rest them" and the hint stands down. */
 KP.trainHint = { minGap: 5, exhausted: 20 };
 
+/* The first-run guide: the four things a new agency does before the game has
+   anything to say back. Content only — whether a step is done is derived from
+   the save by KP.guideSteps() in state.js, so nothing here is ever stored. */
+KP.guide = [
+  { k: 'train', title: 'Train your first trainees', tab: 'trainees', cta: 'Open Trainees',
+    text: 'You start with three trainees. On each card pick what they practise — the ▼ marks their weakest stat — then press Next week (or N) a few times. Switch to REST when stamina runs low.' },
+  { k: 'sign', title: 'Sign one more trainee', tab: 'scout', cta: 'Open Scouting',
+    text: 'Scouting lists six hopefuls; the list changes every few weeks. Look at the ceiling — that is how good they can become, not how good they are today.' },
+  { k: 'debut', title: 'Form your first group', tab: 'trainees', cta: 'Open Trainees',
+    text: 'Press Form a group on the Trainees tab: pick the line-up, a concept that suits their stats, a name and a lightstick colour.' },
+  { k: 'release', title: 'Release your first song', tab: 'groups', cta: 'Open Groups',
+    text: 'On the Groups tab plan a comeback — producer, choreography, MV, promotion. The preview shows what it should score. Songs are how an agency gets paid.' }
+];
+KP.guideWeeks = 3;   // weeks of training that count as "a few"
+
 /* effects are read by the engine; every trait must earn its slot */
 KP.traits = [
   { k: 'perfectionist', name: 'Perfectionist', desc: 'Trains vocal faster, burns stamina', train: { vocal: 1.35 }, stamina: 1.2 },
