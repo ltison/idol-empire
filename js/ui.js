@@ -144,9 +144,18 @@
   ];
 
   function focusGrid(t) {
-    return `<div class="focus-grid">` + FOCI.map(f =>
-      `<button class="focus-btn ${f.k === 'rest' ? 'rest' : ''} ${t.focus === f.k ? 'is-on' : ''}"
-        data-act="focus" data-id="${t.id}" data-key="${f.k}">${f.l}</button>`).join('') + `</div>`;
+    // The weakest stat with room left is marked on its own button, so the most
+    // common training call is read off the button rather than the bars above it.
+    // An exhausted idol's card already says "rest them"; an arrow pointing at a
+    // stat would be the opposite advice on the same card.
+    const weak = t.stamina < KP.trainHint.exhausted ? null : KP.weakestStat(t);
+    return `<div class="focus-grid">` + FOCI.map(f => {
+      const isWeak = f.k === weak;
+      const tip = isWeak
+        ? ` title="Weakest stat · ${Math.round(t.stats[f.k])} of ${Math.round(t.potential[f.k])} ceiling"` : '';
+      return `<button class="focus-btn ${f.k === 'rest' ? 'rest' : ''} ${t.focus === f.k ? 'is-on' : ''} ${isWeak ? 'is-weak' : ''}"
+        data-act="focus" data-id="${t.id}" data-key="${f.k}"${tip}>${f.l}${isWeak ? '<em>▼</em>' : ''}</button>`;
+    }).join('') + `</div>`;
   }
 
   function vitals(t) {
@@ -211,7 +220,7 @@
       <div>${statRows(t)}</div>
       ${vitals(t)}
       <div class="row">
-        ${t.stamina < 20 && t.status !== 'injured' ? '<span class="chip hot">Exhausted — rest them</span>' : ''}
+        ${t.stamina < KP.trainHint.exhausted && t.status !== 'injured' ? '<span class="chip hot">Exhausted — rest them</span>' : ''}
         ${traitChips(t)}
       </div>
       ${footer}
@@ -555,11 +564,28 @@
       return head + `<div class="empty"><b>Nobody in the building</b>Head to Scouting and sign your first trainee.</div>`;
     }
 
+    // Debuted idols are filed under their act, in the act's own line-up order,
+    // so a roster of twenty faces reads as four groups rather than one pile.
+    // Units are skipped: their members already sit under the parent group.
+    const seen = {};
+    const byGroup = KP.mainGroups(st).map(g => {
+      const members = KP.memberOf(st, g).filter(t => t.groupId === g.id && !seen[t.id]);
+      members.forEach(t => { seen[t.id] = true; });
+      return { g, members };
+    }).filter(x => x.members.length);
+    const stray = debuted.filter(t => !seen[t.id]);
+    const groupBlock = ({ g, members }) => `<div class="roster-group" style="${skin(g.color)}">
+        <div class="roster-head"><span class="chip act" style="${skin(g.color)}">${U.esc(g.name)}</span>
+          <span class="tiny muted">${members.length} member${members.length === 1 ? '' : 's'}</span></div>
+        <div class="grid g-3">${members.map(t => idolCard(t, 'trainee')).join('')}</div>
+      </div>`;
+
     return head + contractsCard(st) +
       (undebuted.length ? `<div class="grid g-3">${undebuted.map(t => idolCard(t, 'trainee')).join('')}</div>` : '') +
       (debuted.length ? `<div class="sec-head" style="margin-top:28px"><h2>Debuted idols</h2><span class="kr">아이돌</span>
-        <p>Still training between schedules</p></div>
-        <div class="grid g-3">${debuted.map(t => idolCard(t, 'trainee')).join('')}</div>` : '');
+        <p>${debuted.length} across ${byGroup.length} group${byGroup.length === 1 ? '' : 's'} · still training between schedules</p></div>
+        ${byGroup.map(groupBlock).join('')}
+        ${stray.length ? `<div class="grid g-3">${stray.map(t => idolCard(t, 'trainee')).join('')}</div>` : ''}` : '');
   }
 
   /* The other end of the audition room: a broadcaster's budget, ten weeks of

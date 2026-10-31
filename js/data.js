@@ -155,6 +155,12 @@ KP.STATS = [
   { k: 'variety', label: 'Variety', kr: '예능' }
 ];
 
+/* The weakest-stat hint on the training buttons. Gain per week scales with
+   (ceiling - stat) / 26, so a stat under `minGap` from its ceiling moves a
+   fraction of a point a week and is not worth pointing at. Below `exhausted`
+   stamina the card says "rest them" and the hint stands down. */
+KP.trainHint = { minGap: 5, exhausted: 20 };
+
 /* effects are read by the engine; every trait must earn its slot */
 KP.traits = [
   { k: 'perfectionist', name: 'Perfectionist', desc: 'Trains vocal faster, burns stamina', train: { vocal: 1.35 }, stamina: 1.2 },
