@@ -368,6 +368,12 @@ kbd{
 .focus-btn:hover{ color:var(--text); background:rgba(255,255,255,.1); }
 .focus-btn.is-on{ background:rgba(255,46,134,.2); border-color:var(--pink); color:#fff; }
 .focus-btn.rest.is-on{ background:rgba(91,231,176,.18); border-color:var(--mint); }
+.focus-btn.is-weak{ color:var(--text); border-color:rgba(255,122,69,.55); }
+.focus-btn em{ font-style:normal; font-size:8px; margin-left:3px; color:#FF7A45; vertical-align:1px; }
+.focus-btn.is-on em{ color:#fff; }
+
+.roster-group{ margin:0 0 22px; padding-left:12px; border-left:3px solid var(--accent); }
+.roster-head{ display:flex; align-items:center; gap:10px; margin:0 0 10px; }
 
 .vitals{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 .vital{ display:grid; gap:4px; }

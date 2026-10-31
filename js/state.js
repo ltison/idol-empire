@@ -102,6 +102,20 @@
     );
   };
 
+  /* The stat a training week is best spent on: the lowest one that still has
+     room under its ceiling. A stat already at potential is not "weak", it is
+     finished — pointing the player at it would spend a week on nothing. Null
+     when every stat has topped out. */
+  KP.weakestStat = function (t) {
+    let best = null;
+    KP.STATS.forEach(s => {
+      const v = t.stats[s.k];
+      if (t.potential[s.k] - v < 1) return;
+      if (!best || v < t.stats[best]) best = s.k;
+    });
+    return best;
+  };
+
   KP.potentialOverall = function (t) {
     const s = t.potential;
     return Math.round(
