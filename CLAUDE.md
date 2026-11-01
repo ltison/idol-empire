@@ -17,6 +17,15 @@ python3 -m http.server 8000     # then open http://localhost:8000
 saving. There is nothing to build, lint or test — verifying a change means loading the
 page and playing a few weeks.
 
+## Production
+
+Live at **https://ltison.github.io/idol-empire/** — GitHub Pages serving the `master`
+branch as-is (no build, no workflow in the repo). Merging to `master` *is* the deploy, and
+it reaches players within minutes. Players' saves live in their own browser's
+`localStorage` on that origin and survive every deploy, which is why a state-shape change
+must follow the save-format rules below: a breaking change without a migration rung
+breaks real runs in progress, not just a dev file.
+
 ## Architecture
 
 Five scripts share one global namespace `KP`, loaded in a fixed order from `index.html`
