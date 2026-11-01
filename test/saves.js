@@ -183,6 +183,9 @@ function autopilotWeek(game, i) {
     const victim = mains[mains.length - 1];
     act(() => E.disband(st, victim.id, victim.memberIds.filter((_, k) => k % 2 === 0)));
   }
+  // The first-run guide's one stored bit: closed early, reopened later.
+  if ('guideOff' in st && i === 4) st.guideOff = true;
+  if ('guideOff' in st && i === 120) st.guideOff = false;
   // Money things.
   if (E.takeDebt && i === 25) act(() => E.takeDebt(st, 'loan', KP.finance.loans[0].k));
   if (E.takeDeal && KP.platforms && i === 40) act(() => E.takeDeal(st, KP.platforms[0].k));

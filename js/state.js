@@ -361,6 +361,7 @@
       survival: null,     // the show on air, and the finals night it owes you
       reviews: [],        // one record per year that ended, newest first
       pendingReview: null,// a year the UI still owes the player a look back at
+      guideOff: false,    // the player closed the first-run guide
       records: {},        // the high-water marks, by KP.recordKinds key
       trendWeek: 0,
       trends: {},
@@ -626,6 +627,25 @@
     'tourLegs', 'scandals', 'units', 'renewals', 'departures', 'shows', 'debuts'];
   KP.STAT_KEYS = STAT_KEYS;
   KP.blankStats = () => STAT_KEYS.reduce((o, k) => { o[k] = 0; return o; }, {});
+
+  /* The first-run guide, read off the save rather than stored: each step is
+     done when the thing it asks for has happened, and a later step implies the
+     earlier ones (a released trainee or a disbanded group must not un-tick the
+     road that led here). Null once the guide has nothing left to say. */
+  KP.guideSteps = function (st) {
+    const s = st.stats || {};
+    const released = (s.releases || 0) > 0;
+    const debuted = released || (s.debuts || 0) > 0 || st.groups.length > 0;
+    // The agency opens with three trainees, so "signed" means a fourth.
+    const signed = debuted || st.trainees.length >= 4;
+    const trained = debuted || st.trainees.some(t => (t.weeksTrained || 0) >= KP.guideWeeks);
+    const done = { sign: signed, train: trained, debut: debuted, release: released };
+    const steps = KP.guide.map(g => Object.assign({ done: !!done[g.k] }, g));
+    if (steps.every(x => x.done)) return null;
+    const cur = steps.find(x => !x.done);
+    cur.current = true;
+    return steps;
+  };
 
   /* ====================== relationships and chemistry ======================
      One bond per PAIR, stored on the group as { 'idA|idB': value }, and every
@@ -1135,6 +1155,9 @@
       .filter(r => r && typeof r === 'object' && typeof r.y === 'number' && isFinite(r.y))
       .slice(0, KP.awards.historyYears);
     if (typeof st.pendingReview !== 'number') st.pendingReview = null;
+    // The first-run guide's only stored bit: the player closed it. Every step's
+    // progress is derived (KP.guideSteps), so an older file needs nothing else.
+    if (typeof st.guideOff !== 'boolean') st.guideOff = false;
     // A story the run was in the middle of answering. Both of these are plain
     // records with a group id in them, and a group can disband between the week
     // the file was written and the week it is opened — a scandal about nobody is

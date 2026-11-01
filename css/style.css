@@ -377,6 +377,20 @@ kbd{
 .roster-group{ margin:0 0 22px; padding-left:12px; border-left:3px solid var(--accent); }
 .roster-head{ display:flex; align-items:center; gap:10px; margin:0 0 10px; }
 
+/* first-run guide */
+.guide{ border-color:rgba(255,46,134,.35); }
+.guide-list{ list-style:none; margin:0; padding:0; display:grid; gap:8px; }
+.guide-step{ display:grid; grid-template-columns:28px 1fr; gap:12px; align-items:start;
+  padding:10px 12px; border-radius:var(--r-md); background:rgba(255,255,255,.03); }
+.guide-step b{ font-size:14px; display:block; line-height:28px; }
+.guide-step p{ margin:2px 0 10px; color:var(--muted); font-size:13px; line-height:1.5; }
+.guide-num{ width:28px; height:28px; border-radius:50%; display:grid; place-items:center;
+  font-family:var(--mono); font-size:12px; font-weight:700; background:rgba(255,255,255,.07); color:var(--muted); }
+.guide-step.is-current{ background:rgba(255,46,134,.08); }
+.guide-step.is-current .guide-num{ background:var(--pink); color:#fff; }
+.guide-step.is-done b{ color:var(--muted); text-decoration:line-through; text-decoration-color:rgba(255,255,255,.25); }
+.guide-step.is-done .guide-num{ background:rgba(91,231,176,.18); color:var(--mint); }
+
 .vitals{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 .vital{ display:grid; gap:4px; }
 .vital span{ font-family:var(--mono); font-size:9px; letter-spacing:.14em; text-transform:uppercase; color:var(--dim); display:flex; justify-content:space-between; }

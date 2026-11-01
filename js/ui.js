@@ -377,6 +377,27 @@
 
   /* ================================ screens ================================ */
 
+  /* The first-run guide: four steps, the current one opened up with a button
+     that takes the player where it is done. Progress is derived from the save
+     (KP.guideSteps), so it ticks itself off as the player plays. */
+  function guideCard(st) {
+    if (st.guideOff) return '';
+    const steps = KP.guideSteps(st);
+    if (!steps) return '';
+    const n = steps.filter(s => s.done).length;
+    const rows = steps.map((s, i) => `<li class="guide-step ${s.done ? 'is-done' : ''} ${s.current ? 'is-current' : ''}">
+        <span class="guide-num">${s.done ? '✓' : i + 1}</span>
+        <div><b>${U.esc(s.title)}</b>${s.current ? `<p>${U.esc(s.text)}</p>
+          <button class="btn btn-sm btn-primary" data-act="goto" data-tab="${s.tab}">${U.esc(s.cta)}</button>` : ''}</div>
+      </li>`).join('');
+    return `<div class="card guide" style="margin-top:16px">
+      <div class="sec-head"><h2>Getting started</h2><span class="kr">시작하기</span>
+        <p>${n} of ${steps.length} done</p><span class="spacer"></span>
+        <button class="btn btn-sm btn-ghost" data-act="guide-hide" title="You can bring it back from the ⋯ menu">Hide guide</button></div>
+      <ol class="guide-list">${rows}</ol>
+    </div>`;
+  }
+
   function officeTab(st) {
     const c = st.company;
     // One derivation, read three ways. The investor share is not billed in step 5
@@ -459,6 +480,8 @@
       <p class="muted" style="margin:8px 0 0">${U.esc(c.ceo)} · ${U.esc(c.name)} · ${KP.difficulties[c.difficulty].label} run</p>
       <div class="recap" style="margin-top:16px">${recap}</div>
     </div>
+
+    ${guideCard(st)}
 
     <div style="margin-top:16px">${seasonCard(st)}</div>
 
@@ -1422,6 +1445,33 @@
     el.textContent = text;
     $('#toasts').appendChild(el);
     setTimeout(() => el.remove(), 4200);
+  };
+
+  /* ---------------------------- first run ---------------------------------- */
+
+  /* Shown once, straight after a new agency opens: what the game is and the
+     four steps of the guide, so the first screen is not a wall of numbers. */
+  ui.openWelcome = function () {
+    const st = KP.state;
+    const live = KP.guideSteps(st);
+    const cur = live && live.find(s => s.current);
+    const steps = KP.guide.map((g, i) => `<li class="guide-step is-current">
+        <span class="guide-num">${i + 1}</span><div><b>${U.esc(g.title)}</b><p>${U.esc(g.text)}</p></div></li>`).join('');
+    ui.modal(`
+      <div class="modal-head">
+        <div><div class="kr">환영합니다</div><h3>Welcome to ${U.esc(st.company.name)}</h3></div>
+        <button class="modal-close" data-act="modal-close">✕</button>
+      </div>
+      <p class="muted" style="margin:0 0 16px">You run a K-pop agency. Sign trainees, train them, debut them as a
+        group and put songs on the chart — while the weekly bills keep coming. Every press of
+        <b>Next week</b> (or the <kbd>N</kbd> key) is one week: training, schedules, the chart and the books.
+        If the money runs out, the agency closes.</p>
+      <ol class="guide-list">${steps}</ol>
+      <p class="tiny muted" style="margin:14px 0 0">The same steps wait on the Office tab and tick themselves off as you go.
+        The game saves itself every week.</p>
+      <div class="modal-foot"><span class="spacer"></span>
+        <button class="btn btn-primary" data-act="goto" data-tab="${cur ? cur.tab : 'dash'}">${cur ? U.esc(cur.cta) : 'Got it'}</button></div>
+    `);
   };
 
   /* --------------------------- debut wizard -------------------------------- */
@@ -2492,6 +2542,7 @@
         <button class="opt" data-act="menu-save"><div><b>Save now</b><small>The run also autosaves every week</small></div><span></span><span class="c">⌘</span></button>
         <button class="opt" data-act="menu-export"><div><b>Download save</b><small>A JSON file you can keep, move to another browser or re-import later</small></div><span></span><span class="c">↓</span></button>
         <button class="opt" data-act="menu-import"><div><b>Load save file</b><small>Replaces the run in progress</small></div><span></span><span class="c">↑</span></button>
+        <button class="opt" data-act="guide-show"><div><b>How to play</b><small>The first four steps, and the guide back on the Office tab</small></div><span></span><span class="c">?</span></button>
         <button class="opt" data-act="menu-quit"><div><b>Abandon run</b><small>Deletes the save and returns to the title</small></div><span></span><span class="c">✕</span></button>
       </div>
       <div class="modal-foot">
