@@ -197,7 +197,7 @@
         : group
           // The act's own colour on the chip, so a roster of twenty faces sorts
           // itself into groups at a glance rather than by reading every card.
-          ? `<div class="row"><span class="chip act" style="${skin(group.color)}">${U.esc(group.name)}</span><span class="chip">${U.esc(t.position || '')}</span>${contract}${fame}</div>${focusGrid(t)}`
+          ? `<div class="row"><span class="chip act" style="${skin(group.color)}">${U.esc(group.name)}</span><span class="chip">${U.esc(t.position || '')}</span>${contract}</div>${focusGrid(t)}`
           : focusGrid(t) + `<div class="row" style="margin-top:8px">${contract}${fame}<span class="spacer"></span>
               <button class="btn btn-sm btn-cut" data-act="release" data-id="${t.id}"
                 title="Tear up the contract — no refund">Release</button></div>`;
@@ -1459,7 +1459,9 @@
         <div class="idol-top" style="pointer-events:none">
           ${avatar(t)}
           <div><div class="idol-name" style="font-size:13px">${U.esc(t.name)}</div>
-          <div class="idol-meta">${t.age}y · ovr ${KP.overall(t)}</div></div>
+          <div class="idol-meta">${t.age}y · ovr ${KP.overall(t)}${KP.contractLeft(st, t) != null
+            ? ' · <span class="' + (KP.inRenewWindow(st, t) ? 'neg' : '') + '">📄 ' +
+              (KP.contractLeft(st, t) / KP.WEEKS_PER_YEAR).toFixed(1) + 'y</span>' : ''}</div></div>
         </div>
       </div>`).join('');
 
@@ -2180,15 +2182,15 @@
         <u style="width:${U.clamp(p.v, 0, 100).toFixed(0)}%"></u></div>
     </div>`).join('');
 
-    const adds = free.length ? free.map(t => `<button class="opt"
+    const adds = free.length ? free.map(t => { const held = KP.contractLeft(st, t); return `<button class="opt"
         data-act="join-group" data-gid="${g.id}" data-id="${t.id}"
         ${st.company.money < cost || members.length >= 7 ? 'disabled' : ''}>
       <div><b>${U.esc(t.name)}</b><small>${t.age}y · ovr ${KP.overall(t)} · ceiling ${KP.potentialOverall(t)}${
         t.fame > 0 ? ' · ' + Math.round(t.fame) + ' points of a name the public knows' : ''}${
-        KP.contractLeft(st, t) != null ? ' · ' + (KP.contractLeft(st, t) / KP.WEEKS_PER_YEAR).toFixed(1) + 'y left on their contract' : ''}</small></div>
+        held != null ? ' · ' + (held / KP.WEEKS_PER_YEAR).toFixed(1) + 'y left on their contract' : ''}</small></div>
       <span class="q">joins at ${B.newcomer}</span>
       <span class="c">${U.money(cost)}</span>
-    </button>`).join('')
+    </button>`; }).join('')
       : `<p class="tiny muted">Nobody free in the building.</p>`;
 
     ui.modal(`

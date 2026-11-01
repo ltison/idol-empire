@@ -341,8 +341,14 @@ flag on the record.
 stamp a contract — hands it back instead of a fresh seven years. Clearing it outright is what
 used to make "graduate, then re-introduce" a full renewal for the price of a showcase. A held
 term cannot be renewed (the renewal table is for idols and prices off a group), gets the same
-two stateless warnings, and walks the person out through `toMarket` when it runs out
-(`heldTermWeek`, inside step 6b). `KP.contractLeft` is the one reader for both fields.
+two stateless warnings, and walks the person out through `toMarket` when it runs out —
+`E.contractWeek` (step 6b) handles both shapes in one loop through `KP.contractLeft`, the
+one reader for both fields. Because those warnings are equalities, `signTerm` logs its own
+when somebody re-debuts already inside the window. Every door an ex-idol leaves by —
+disband release, an expired held term, the trainee card's Release — goes through `toMarket`,
+or keeping them on and releasing them a click later would hide them from the agencies.
+A disbandment also charges a pending `st.fallout`'s reputation hit on the spot, since
+`disbandGroup` drops the fallout and the agency's share of a lie is not buried with the act.
 **Pre-debut fame is cashed once**: `E.debut` and `E.joinGroup` zero `t.fame` after crediting
 it, or the next graduation and re-introduction would sell the same name twice.
 

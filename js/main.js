@@ -193,7 +193,7 @@
       const r = KP.engine.release(KP.state, d.id);
       if (!r.ok) return ui.toast(r.msg || 'They cannot be released.', 'bad');
       ui.render();
-      ui.toast((t ? t.name : 'They') + ' left the company.', '');
+      ui.toast((t ? t.name : 'They') + ' left the company' + (r.to ? ' · ' + r.to + ' signed them' : '') + '.', r.to ? 'bad' : '');
     },
 
     downgrade(d) {
