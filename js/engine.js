@@ -1735,11 +1735,38 @@
   }
   E.disbandGroup = disbandGroup;
 
+  /* Out of the line-up, still on the books. The term belongs to the PERSON,
+     not to the act: whatever is left of it is held as `t.termAbs` while they sit
+     in the trainee room and handed back by signTerm when they are next in a
+     line-up. Clearing it instead is what used to make a graduation followed by
+     a showcase a seven-year renewal for the price of the showcase. Called twice
+     on one person (leaveGroup, then disbandGroup) it is a no-op the second time. */
   function clearContract(t) {
+    if (typeof t.contractAbs === 'number') t.termAbs = t.contractAbs;
     t.groupId = null;
     t.position = null;
     delete t.debutAbs;
     delete t.contractAbs;
+  }
+
+  /* Into a line-up: E.debut and E.joinGroup both come through here, so a first
+     debut and a re-debut can never disagree about what a contract is. A fresh
+     term for somebody who has never had one; the rest of their own term for
+     somebody who has — a new act is not a new contract, and a term that is
+     already in its last year opens the renewal table the week they are back. */
+  function signTerm(st, t) {
+    t.debutAbs = KP.absWeek(st);
+    t.contractAbs = typeof t.termAbs === 'number'
+      ? t.termAbs
+      : t.debutAbs + KP.contracts.termYears * KP.WEEKS_PER_YEAR;
+    delete t.termAbs;
+    // The cliff's warnings are equalities that fire on one exact week, and a
+    // re-debut can land after both of them — so say it here, once, on the way in.
+    const left = t.contractAbs - t.debutAbs;
+    if (left <= KP.contracts.windowWeeks) {
+      KP.log(t.name + ' is back in a line-up with ' + left + ' week' + (left === 1 ? '' : 's') +
+        ' left on their contract — the renewal table is open.', 'bad');
+    }
   }
 
   /* One person out of one line-up, whatever put them there: a contract that ran
@@ -1821,8 +1848,7 @@
     st.company.money -= cost;
     t.groupId = g.id;
     t.focus = 'dance';
-    t.debutAbs = KP.absWeek(st);
-    t.contractAbs = t.debutAbs + KP.contracts.termYears * KP.WEEKS_PER_YEAR;
+    signTerm(st, t);
     g.memberIds.push(t.id);
     seedBonds(st, g, KP.memberOf(st, g),
       () => KP.bonds.newcomer + U.rnd(-6, 6), t.id);
@@ -1830,6 +1856,9 @@
     // A new face is news, and the news is neither good nor bad: some of the
     // public turns up to look and some of the fandom is not having it.
     gainFans(g, g.fans * .02 + t.fame * KP.survival.fameFans);
+    // Cashed. A name the public knows is spent at the showcase that used it,
+    // or the next graduation and re-introduction would sell it a second time.
+    t.fame = 0;
     bumpSenti(g, -2);
     g.momentum = U.clamp(g.momentum + 4, 0, 100);
     KP.log(t.name + ' has joined ' + g.name + ' · ' + U.money(cost) +
@@ -1850,6 +1879,92 @@
     KP.log(t.name + ' has graduated from ' + name + '.', 'bad');
     pushRecap(st, '🎓', t.name + ' left ' + name, 'bad');
     return r;
+  };
+
+  /* =========================== disbanding a group ==========================
+     The act ends and the people do not, so the decision is per person: kept on
+     (the trainee room, the payroll, the rest of their own term held by
+     clearContract, and a slice of the fandom as `t.fame` that evaporates there
+     like a survival show's does) or released (off the books, and into the market
+     through toMarket). There is no fee and no refusal on the way out: a contract
+     is a contract wherever the person sits, and because the term travels with
+     them a disbandment cannot reset it. E.disbandPreview is the single source of
+     every number the modal prints; E.disband applies it rather than recomputing.
+     ======================================================================== */
+
+  E.disbandBlock = function (st, g) {
+    if (!g) return 'That group is gone.';
+    if (KP.isUnit(g)) return 'A unit is wrapped up, not disbanded.';
+    // Ending the act is not an answer to a story about it. The question has a
+    // deadline and step 0 is where it is answered, one way or another.
+    if (st.scandal && st.scandal.gid === g.id) return 'There is a story about ' + g.name + ' waiting for an answer.';
+    return null;
+  };
+
+  E.disbandPreview = function (st, gid) {
+    const g = st.groups.find(x => x.id === gid);
+    const D = KP.disband;
+    const blocked = E.disbandBlock(st, g);
+    if (!g || KP.isUnit(g)) return { ok: false, msg: blocked };
+    const members = KP.memberOf(st, g);
+    const n = Math.max(1, members.length);
+    const follow = D.fameShare * U.clamp(KP.loyalOf(g) / KP.fandom.midLoyal, D.fameLoyal[0], D.fameLoyal[1]);
+    const fame = Math.round(U.clamp(g.fans / n * follow / KP.survival.fameFans, 0, 100));
+    const units = KP.unitsOf(st, g.id);
+    const unitIds = units.map(u => u.id);
+    return {
+      ok: !blocked, msg: blocked, g,
+      rows: members.map(t => ({ t, fame, left: KP.contractLeft(st, t), window: KP.inRenewWindow(st, t) })),
+      rep: D.rep,
+      bookings: (st.bookings || []).filter(b => b.groupId === g.id || unitIds.indexOf(b.groupId) >= 0).length,
+      units: units.map(u => u.name),
+      charting: (st.chart || []).some(r => r.groupId === g.id)
+    };
+  };
+
+  /* `keepIds` is who the player chose to keep; anybody not in it is released. */
+  E.disband = function (st, gid, keepIds) {
+    const pv = E.disbandPreview(st, gid);
+    if (!pv.ok) return { ok: false, msg: pv.msg };
+    const keep = new Set(keepIds || []);
+    const D = KP.disband;
+    st.company.rep = U.clamp(st.company.rep - D.rep, 0, 100);
+    // A denial that was a lie is not buried with the act. disbandGroup drops the
+    // pending fallout because its fans and sentiment have nowhere left to land,
+    // but the agency's share of the bill is the agency's: the press goes looking
+    // the week a group ends, so it comes due tonight rather than never.
+    if (st.fallout && st.fallout.gid === pv.g.id) {
+      const f = st.fallout;
+      st.company.rep = U.clamp(st.company.rep + KP.scandal.backfire.rep, 0, 100);
+      KP.log('With ' + pv.g.name + ' gone, the denial falls apart — ' + f.who +
+        '\'s story was true after all.', 'bad');
+      pushRecap(st, '💣', 'Denial backfired · ' + f.who, 'bad');
+    }
+    // disbandGroup clears every member's contract into a held term and takes the
+    // units, the diary, the chart row and any story about the act with it.
+    const name = disbandGroup(st, pv.g, 'disband');
+
+    const kept = [], released = [];
+    pv.rows.forEach(r => {
+      const t = r.t;
+      if (keep.has(t.id)) {
+        t.morale = U.clamp(t.morale - D.morale, 0, 100);
+        t.fame = r.fame;
+        kept.push(t.name);
+        return;
+      }
+      st.trainees = st.trainees.filter(x => x.id !== t.id);
+      released.push({ name: t.name, to: toMarket(st, t) });
+    });
+    // Everybody left a line-up tonight, kept or not — the same count five
+    // graduations would have made.
+    bumpStat(st, 'departures', pv.rows.length);
+
+    KP.log(name + ' has disbanded. ' +
+      (kept.length ? kept.join(', ') + (kept.length === 1 ? ' stays' : ' stay') + ' with the agency. ' : '') +
+      (released.length ? released.map(r => r.name).join(', ') + ' — released.' : ''), 'bad');
+    pushRecap(st, '💔', name + ' disbanded', 'bad');
+    return { ok: true, name, kept: kept.length, released };
   };
 
   /* ============================== sub-units ================================
@@ -1998,46 +2113,57 @@
      fires exactly once per person and needs no flag on the record. */
   E.contractWeek = function (st) {
     const C = KP.contracts;
-    const abs = KP.absWeek(st);
     // A copy, because leaving mutates st.trainees through E.leaveGroup.
     st.trainees.slice().forEach(t => {
-      if (!t.groupId || typeof t.contractAbs !== 'number') return;
-      const left = t.contractAbs - abs;
+      // One reader for both shapes of a term: a member's contractAbs, and the
+      // rest of it held as termAbs by somebody whose act ended. The second can
+      // not be renewed from the trainee room — the renewal table is for idols
+      // and prices off a group — so its warnings say where the decision is.
+      const left = KP.contractLeft(st, t);
+      if (left == null) return;
+      const g = t.groupId ? st.groups.find(x => x.id === t.groupId) : null;
       if (left === C.windowWeeks) {
-        KP.log(t.name + '\'s contract enters its final year — the renewal table is open.', 'info');
+        KP.log(t.name + '\'s contract enters its final year — ' + (t.groupId
+          ? 'the renewal table is open.' : 'they can only be re-signed from a line-up.'), 'info');
         pushRecap(st, '📄', t.name + ' · final year of their contract', '');
       } else if (left === 8) {
-        KP.log(t.name + ' has eight weeks left on their contract' +
-          (KP.willRenew(st, t) ? ' and is asking ' + U.money(KP.renewCost(st, t)) + '.'
+        KP.log(t.name + ' has eight weeks left on their contract' + (!t.groupId ? ' and is not in a line-up.'
+          : KP.willRenew(st, t) ? ' and is asking ' + U.money(KP.renewCost(st, t)) + '.'
             : ' and is not re-signing.'), 'bad');
       }
       if (left > 0) return;
 
-      const g = st.groups.find(x => x.id === t.groupId);
-      const gname = g ? g.name : 'the group';
-      const r = E.leaveGroup(st, t, 'contract');
-      if (!r.ok) return;
-      st.trainees = st.trainees.filter(x => x.id !== t.id);
-      KP.log(t.name + '\'s contract with ' + gname + ' has expired. They are leaving the company.', 'bad');
-      pushRecap(st, '🚪', t.name + ' left · contract expired', 'bad');
-      // Somebody with seven years of stages behind them does not sit at home.
-      // Only agencies of the player's own kind are in the market for them, on
-      // the same rule the audition room's poach follows.
-      if (U.chance(C.poachChance)) {
-        const pool = (st.rivals || []).filter(rr => {
-          const sp = KP.rivalSpec(rr);
-          return sp && sp.gender === st.company.gender;
-        });
-        if (pool.length) {
-          const rr = U.pick(pool);
-          const sp = KP.rivalSpec(rr);
-          if (rr.trainees.length >= KP.rivals.rosterCap) rr.trainees.shift();
-          rr.trainees.push(KP.stripRivalPerson(JSON.parse(JSON.stringify(t))));
-          KP.log(sp.name + ' has signed ' + t.name + '.', 'bad');
-        }
+      if (t.groupId) {
+        const r = E.leaveGroup(st, t, 'contract');
+        if (!r.ok) return;
       }
+      st.trainees = st.trainees.filter(x => x.id !== t.id);
+      KP.log(t.name + '\'s contract' + (g ? ' with ' + g.name : '') +
+        ' has expired. They are leaving the company.', 'bad');
+      pushRecap(st, '🚪', t.name + ' left · contract expired', 'bad');
+      toMarket(st, t);
     });
   };
+
+  /* Somebody with years of stages behind them does not sit at home. Only
+     agencies of the player's own kind are in the market for them, on the same
+     rule the audition room's poach follows. One path for everybody who walks
+     out of the building — an expired contract and a disbandment's release alike —
+     so the two can never quote different odds. Returns the agency's name. */
+  function toMarket(st, t) {
+    if (!U.chance(KP.contracts.poachChance)) return null;
+    const pool = (st.rivals || []).filter(rr => {
+      const sp = KP.rivalSpec(rr);
+      return sp && sp.gender === st.company.gender;
+    });
+    if (!pool.length) return null;
+    const rr = U.pick(pool);
+    const sp = KP.rivalSpec(rr);
+    if (rr.trainees.length >= KP.rivals.rosterCap) rr.trainees.shift();
+    rr.trainees.push(KP.stripRivalPerson(JSON.parse(JSON.stringify(t))));
+    KP.log(sp.name + ' has signed ' + t.name + '.', 'bad');
+    return sp.name;
+  }
 
   /* ============================ the survival show ==========================
      Ten weeks of television for a finals night, and the finals night is the
@@ -3109,7 +3235,12 @@
     if (t.groupId) return { ok: false, msg: 'Remove them from their group first.' };
     st.trainees = st.trainees.filter(x => x.id !== traineeId);
     KP.log(t.name + ' left the company.', 'info');
-    return { ok: true };
+    // Somebody who has stood on a stage is on the market the same way whichever
+    // door they leave by — or keeping them on at a disbandment and tearing the
+    // contract up a click later would be a way to keep them from the agencies.
+    // A trainee who never debuted is nobody's headline.
+    const to = typeof t.termAbs === 'number' ? toMarket(st, t) : null;
+    return { ok: true, to };
   };
 
   /* Re-runnable, and it has to be: this is called on every line-up change as
@@ -3188,15 +3319,13 @@
       bonds: {},
       debut: { y: st.year, w: st.week }
     };
-    // Seven years, from tonight. The clock is the group's, not the company's: a
-    // trainee is on a training agreement and has nothing to renegotiate, which
-    // is why the contract fields only exist on somebody who has debuted.
-    const term = KP.contracts.termYears * KP.WEEKS_PER_YEAR;
+    // Seven years from tonight for a first debut; the rest of their own term
+    // for somebody re-debuting out of an act that ended (see signTerm).
     members.forEach(m => {
       m.groupId = g.id;
       m.focus = 'dance';
-      m.debutAbs = KP.absWeek(st);
-      m.contractAbs = m.debutAbs + term;
+      signTerm(st, m);
+      m.fame = 0;           // cashed into g.fans above — see E.joinGroup
     });
     seedBonds(st, g, members, () => U.rnd(KP.bonds.start[0], KP.bonds.start[1]));
     E.assignPositions(st, members);

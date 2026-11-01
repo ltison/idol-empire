@@ -1090,6 +1090,27 @@ KP.contracts = {
   poachChance: .5          // ...and the odds they turn up in somebody else's building
 };
 
+/* ========================== disbanding a group ============================
+   The act ends; the people do not. Every member gets one of two fates and the
+   player picks per person: kept on (back to the trainee room, on the payroll,
+   carrying a slice of the fandom as `t.fame` that starts evaporating the week
+   the group is gone) or released (off the books, and into the market on the
+   same odds an expired contract walks into).
+
+   There is no fee for keeping anybody: the rest of their term goes with them
+   (`t.termAbs`), so a disbandment is never a contract reset, and somebody in
+   their final year who is not back in a line-up by the end of it walks. Renew
+   them BEFORE the act ends if they matter — the renewal table is for idols. */
+KP.disband = {
+  rep: 4,                  // a disbandment is a headline the industry reads
+  morale: 12,              // what it does to the people kept on
+  // The share of each member's slice of the fandom that follows them as fame,
+  // scaled by loyalty against KP.fandom.midLoyal — an invested fandom follows
+  // people, a casual one followed a song.
+  fameShare: .4,
+  fameLoyal: [.5, 1.5]
+};
+
 /* ============================ the survival show ===========================
    The audition list is six names a month and the agencies take whoever you
    leave. A survival show is the other end of that: a broadcaster's budget, ten

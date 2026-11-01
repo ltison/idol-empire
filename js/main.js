@@ -193,7 +193,7 @@
       const r = KP.engine.release(KP.state, d.id);
       if (!r.ok) return ui.toast(r.msg || 'They cannot be released.', 'bad');
       ui.render();
-      ui.toast((t ? t.name : 'They') + ' left the company.', '');
+      ui.toast((t ? t.name : 'They') + ' left the company' + (r.to ? ' · ' + r.to + ' signed them' : '') + '.', r.to ? 'bad' : '');
     },
 
     downgrade(d) {
@@ -246,6 +246,27 @@
       ui.render();
       KP.save();
       ui.toast('Introduced — the room does not know them yet.', '');
+    },
+
+    'open-disband'(d) {
+      const pv = KP.engine.disbandPreview(KP.state, d.id);
+      if (!pv.ok) return ui.toast(pv.msg, 'bad');
+      ui.openDisband(d.id);
+    },
+    'disband-toggle'(d) {
+      const keep = ui.disband.keep, i = keep.indexOf(d.id);
+      if (i >= 0) keep.splice(i, 1); else keep.push(d.id);
+      ui.drawDisband();
+    },
+    'disband-confirm'() {
+      const r = KP.engine.disband(KP.state, ui.disband.gid, ui.disband.keep);
+      if (!r.ok) return ui.toast(r.msg, 'bad');
+      ui.closeModal();
+      ui.render();
+      KP.save();                    // an act that ended stays ended
+      const poached = r.released.filter(x => x.to).length;
+      ui.toast(r.name + ' has disbanded · ' + r.kept + ' kept on, ' + r.released.length + ' released' +
+        (poached ? ' · ' + poached + ' signed elsewhere' : '') + '.', 'bad');
     },
 
     'open-unit'(d) { ui.openUnit(d.id); },

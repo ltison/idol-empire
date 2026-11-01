@@ -316,6 +316,16 @@ folds any unit they were in, charges the fandom, the public mood and the reputat
 disbands the group if it empties. What happens to the *person* afterwards is the caller's:
 a graduate goes back to the trainee room, an expired contract walks out of the building.
 
+**A disbandment the player chooses is `E.disband`, and it decides per person.** It still
+ends through `disbandGroup` (units, diary, chart row and any story go with the act), but the
+people are the decision: kept on (trainee room, `KP.disband.morale` off, the rest of their own
+term held, and a slice of the fandom as `t.fame`, scaled by loyalty, which the debut/join paths
+cash and `trainWeek` decays) or released (out of `st.trainees` and through `toMarket`, the
+same poach path an expired contract takes). There is no fee and no refusal on the way out —
+a contract is a contract wherever the person sits. It refuses while `st.scandal` points at
+the group (ending the act is not an answer). `E.disbandPreview` is the single source of the
+modal's numbers.
+
 **A contract is `t.debutAbs` + `t.contractAbs`, stamped at debut and nowhere else.** A
 trainee has neither — a training agreement has nothing to renegotiate — and `normalise()`
 strips them from anybody without a `groupId` for the same reason. `KP.renewCost()` is what
@@ -324,6 +334,23 @@ they are worth × what they think of you, and `KP.willRenew()` is the floor unde
 The two warnings `E.contractWeek` logs are stateless (`left === 52`, `left === 8`) because
 the tick runs exactly once a week, so an equality fires exactly once per person and needs no
 flag on the record.
+
+**The term belongs to the person, not the act.** `clearContract` moves whatever is left of
+`t.contractAbs` into `t.termAbs` when somebody leaves a line-up and stays in the building
+(a graduation, a disbandment), and `signTerm` — the one place `E.debut` and `E.joinGroup`
+stamp a contract — hands it back instead of a fresh seven years. Clearing it outright is what
+used to make "graduate, then re-introduce" a full renewal for the price of a showcase. A held
+term cannot be renewed (the renewal table is for idols and prices off a group), gets the same
+two stateless warnings, and walks the person out through `toMarket` when it runs out —
+`E.contractWeek` (step 6b) handles both shapes in one loop through `KP.contractLeft`, the
+one reader for both fields. Because those warnings are equalities, `signTerm` logs its own
+when somebody re-debuts already inside the window. Every door an ex-idol leaves by —
+disband release, an expired held term, the trainee card's Release — goes through `toMarket`,
+or keeping them on and releasing them a click later would hide them from the agencies.
+A disbandment also charges a pending `st.fallout`'s reputation hit on the spot, since
+`disbandGroup` drops the fallout and the agency's share of a lie is not buried with the act.
+**Pre-debut fame is cashed once**: `E.debut` and `E.joinGroup` zero `t.fame` after crediting
+it, or the next graduation and re-introduction would sell the same name twice.
 
 The cliff is a real decision and it is priced like one: measured over ten in-game years on
 the same seeds, an agency that never opens the renewal table finishes with **a quarter of
@@ -447,7 +474,11 @@ to change the state shape, and picking the wrong one breaks old files:
   year, which is what the save actually says happened. Stamping the term from "now" would
   hand every long-running file seven free years. `t.fame` (`0`), `st.survival` (`null`, and
   dropped whole rather than half-restored when its cast is gone), the per-group unit fields
-  and `st.stats.units` / `renewals` / `departures` / `shows` (`0`) are the rest. A unit whose
+  and `st.stats.units` / `renewals` / `departures` / `shows` (`0`) are the rest. `t.termAbs` (a
+  held term) is additive on the same terms: an older file has none, so a graduate already
+  sitting in its trainee room reads as a never-signed trainee — that history was not kept.
+  `normalise()` also zeroes `t.fame` on anybody in a group, because older builds left fame
+  on the record after cashing it at the showcase. A unit whose
   parent, kind or members the file no longer has is dropped in `normalise()` — after the
   group loop, because every one of those checks reads a second group — and the booking
   filter below it takes its diary with it.

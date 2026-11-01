@@ -355,6 +355,21 @@ they can be split into.
   a graduation, a burnout, an expired contract — now goes through one path, which is how the
   Leader chip stopped being handed to somebody who had walked out eighteen months earlier
 
+**Disbanding a group**
+- A group can be ended from its card. The fandom goes with the act — and the people are the
+  decision: for every member, kept on or released
+- Whoever stays goes back to the trainee room carrying a slice of the fandom as 📺 fame, more
+  of it the more loyal the fandom was. It is fans at their next debut or line-up showcase, and
+  it fades in the practice room exactly like a survival show's does: reboot them fast or lose it
+- **The contract goes with the person, not the act.** Whoever stays keeps the rest of their own
+  term, and a re-debut hands it back rather than starting a new seven years — so neither a
+  disbandment nor a graduation followed by a re-introduction is a free renewal any more. A term
+  can only be renewed from a line-up: somebody in their final year who is not back in a group
+  by the end of it walks
+- Whoever is released is off the payroll and, about half the time, signed by a rival agency
+- Not while a story about the act is waiting for an answer: ending the group is not a reply
+- Pre-debut fame is spent at the showcase that uses it, so the same name cannot be sold twice
+
 **Survival-show recruitment**
 - Ten weeks of television for a finals night. Reputation and public mood every week it is on
   air, whoever wins
