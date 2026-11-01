@@ -355,6 +355,18 @@ they can be split into.
   a graduation, a burnout, an expired contract — now goes through one path, which is how the
   Leader chip stopped being handed to somebody who had walked out eighteen months earlier
 
+**Disbanding a group**
+- A group can be ended from its card. The fandom goes with the act — and the people are the
+  decision: for every member, kept on or released
+- Whoever stays goes back to the trainee room carrying a slice of the fandom as 📺 fame, more
+  of it the more loyal the fandom was. It is fans at their next debut or line-up showcase, and
+  it fades in the practice room exactly like a survival show's does: reboot them fast or lose it
+- Anybody in their final contract year has to be re-signed to stay — the disbandment brings the
+  renewal table forward — and anybody who would not re-sign at any price walks. That is what
+  stops a disbandment being a free seven-year contract reset
+- Whoever is released is off the payroll and, about half the time, signed by a rival agency
+- Not while a story about the act is waiting for an answer: ending the group is not a reply
+
 **Survival-show recruitment**
 - Ten weeks of television for a finals night. Reputation and public mood every week it is on
   air, whoever wins

@@ -583,6 +583,7 @@ kbd{
 .opt b{ font-size:13px; }
 .opt small{ display:block; color:var(--muted); font-size:11px; font-weight:500; }
 .opt .q{ font-family:var(--mono); font-size:11px; color:var(--cyan); }
+.opt .q.neg{ color:var(--red); }
 .opt-buys{ display:flex; gap:6px; align-items:center; }
 /* scaling back is a retreat, not a purchase — it must never look tempting */
 .btn-cut{

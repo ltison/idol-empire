@@ -1852,6 +1852,99 @@
     return r;
   };
 
+  /* =========================== disbanding a group ==========================
+     The act ends and the people do not, so the decision is per person: kept on
+     (the trainee room, the payroll, and a slice of the fandom as `t.fame` that
+     evaporates there like a survival show's does) or released (off the books,
+     and into the market through toMarket). E.disbandPreview is the single
+     source of truth for every number the modal prints, on the terms
+     E.planPreview has for a release — E.disband applies it rather than
+     recomputing, so the fee a row quotes is the fee that leaves the balance.
+     ======================================================================== */
+
+  E.disbandBlock = function (st, g) {
+    if (!g) return 'That group is gone.';
+    if (KP.isUnit(g)) return 'A unit is wrapped up, not disbanded.';
+    // Ending the act is not an answer to a story about it. The question has a
+    // deadline and step 0 is where it is answered, one way or another.
+    if (st.scandal && st.scandal.gid === g.id) return 'There is a story about ' + g.name + ' waiting for an answer.';
+    return null;
+  };
+
+  E.disbandPreview = function (st, gid) {
+    const g = st.groups.find(x => x.id === gid);
+    const D = KP.disband;
+    const blocked = E.disbandBlock(st, g);
+    if (!g) return { ok: false, msg: blocked };
+    const members = KP.memberOf(st, g);
+    const n = Math.max(1, members.length);
+    const follow = D.fameShare * U.clamp(KP.loyalOf(g) / KP.fandom.midLoyal, D.fameLoyal[0], D.fameLoyal[1]);
+    // Everything here reads the group, so it has to be read while it exists:
+    // a renewal fee is priced off its fandom, its trophies and its room.
+    const rows = members.map(t => {
+      const window = KP.inRenewWindow(st, t);
+      const willing = !window || KP.willRenew(st, t);
+      return {
+        t,
+        window,
+        willing,
+        cost: window && willing ? KP.renewCost(st, t) : 0,
+        fame: Math.round(U.clamp(g.fans / n * follow / KP.survival.fameFans, 0, 100)),
+        left: KP.contractLeft(st, t)
+      };
+    });
+    return {
+      ok: !blocked, msg: blocked, g, rows,
+      rep: D.rep,
+      bookings: (st.bookings || []).filter(b => b.groupId === g.id ||
+        KP.unitsOf(st, g.id).some(u => u.id === b.groupId)).length,
+      units: KP.unitsOf(st, g.id).map(u => u.name),
+      charting: !!(st.chart || []).find(r => r.groupId === g.id)
+    };
+  };
+
+  /* `keepIds` is who the player chose to keep; anybody not in it is released,
+     and anybody who will not re-sign is released whatever the list says. */
+  E.disband = function (st, gid, keepIds) {
+    const pv = E.disbandPreview(st, gid);
+    if (!pv.ok) return { ok: false, msg: pv.msg };
+    const keep = new Set(keepIds || []);
+    const kept = pv.rows.filter(r => r.willing && keep.has(r.t.id));
+    const fee = kept.reduce((s, r) => s + r.cost, 0);
+    // Gated on the fee being real: `0 > money` is true on a negative balance,
+    // and a broke agency must still be able to end an act and let people go.
+    if (fee > 0 && fee > st.company.money) {
+      return { ok: false, msg: 'Keeping them costs ' + U.money(fee) + ' in re-signing fees.' };
+    }
+    const D = KP.disband;
+    const g = pv.g;
+    st.company.money -= fee;
+    st.company.rep = U.clamp(st.company.rep - D.rep, 0, 100);
+    // disbandGroup clears every member's contract and takes the units, the
+    // diary, the chart row and any story about the act with it.
+    const name = disbandGroup(st, g, 'disband');
+
+    const released = [];
+    pv.rows.forEach(r => {
+      const t = r.t;
+      if (kept.indexOf(r) >= 0) {
+        t.morale = U.clamp(t.morale - D.morale, 0, 100);
+        t.fame = r.fame;
+        return;
+      }
+      st.trainees = st.trainees.filter(x => x.id !== t.id);
+      bumpStat(st, 'departures');
+      released.push({ name: t.name, to: toMarket(st, t) });
+    });
+
+    KP.log(name + ' has disbanded. ' +
+      (kept.length ? kept.map(r => r.t.name).join(', ') + (kept.length === 1 ? ' stays' : ' stay') +
+        ' with the agency' + (fee ? ' · ' + U.money(fee) + ' in re-signing fees' : '') + '. ' : '') +
+      (released.length ? released.map(r => r.name).join(', ') + ' — released.' : ''), 'bad');
+    pushRecap(st, '💔', name + ' disbanded', 'bad');
+    return { ok: true, name, kept: kept.length, released, fee };
+  };
+
   /* ============================== sub-units ================================
      A unit is a group record with a parent, which is why nothing below this
      comment had to learn about it: the chart, the books, the schedule board and
@@ -2020,24 +2113,29 @@
       st.trainees = st.trainees.filter(x => x.id !== t.id);
       KP.log(t.name + '\'s contract with ' + gname + ' has expired. They are leaving the company.', 'bad');
       pushRecap(st, '🚪', t.name + ' left · contract expired', 'bad');
-      // Somebody with seven years of stages behind them does not sit at home.
-      // Only agencies of the player's own kind are in the market for them, on
-      // the same rule the audition room's poach follows.
-      if (U.chance(C.poachChance)) {
-        const pool = (st.rivals || []).filter(rr => {
-          const sp = KP.rivalSpec(rr);
-          return sp && sp.gender === st.company.gender;
-        });
-        if (pool.length) {
-          const rr = U.pick(pool);
-          const sp = KP.rivalSpec(rr);
-          if (rr.trainees.length >= KP.rivals.rosterCap) rr.trainees.shift();
-          rr.trainees.push(KP.stripRivalPerson(JSON.parse(JSON.stringify(t))));
-          KP.log(sp.name + ' has signed ' + t.name + '.', 'bad');
-        }
-      }
+      toMarket(st, t);
     });
   };
+
+  /* Somebody with years of stages behind them does not sit at home. Only
+     agencies of the player's own kind are in the market for them, on the same
+     rule the audition room's poach follows. One path for everybody who walks
+     out of the building — an expired contract and a disbandment's release alike —
+     so the two can never quote different odds. Returns the agency's name. */
+  function toMarket(st, t) {
+    if (!U.chance(KP.contracts.poachChance)) return null;
+    const pool = (st.rivals || []).filter(rr => {
+      const sp = KP.rivalSpec(rr);
+      return sp && sp.gender === st.company.gender;
+    });
+    if (!pool.length) return null;
+    const rr = U.pick(pool);
+    const sp = KP.rivalSpec(rr);
+    if (rr.trainees.length >= KP.rivals.rosterCap) rr.trainees.shift();
+    rr.trainees.push(KP.stripRivalPerson(JSON.parse(JSON.stringify(t))));
+    KP.log(sp.name + ' has signed ' + t.name + '.', 'bad');
+    return sp.name;
+  }
 
   /* ============================ the survival show ==========================
      Ten weeks of television for a finals night, and the finals night is the

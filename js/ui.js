@@ -744,7 +744,9 @@
               title="Wrap the unit up — its members go back to the group full time">Wrap up</button>`
         : `<button class="btn" data-act="open-lineup" data-id="${g.id}">Line-up</button>
              <button class="btn" data-act="open-unit" data-id="${g.id}"
-               ${units.length >= KP.units.maxPer ? 'disabled' : ''}>Form a unit</button>`}
+               ${units.length >= KP.units.maxPer ? 'disabled' : ''}>Form a unit</button>
+             <button class="btn btn-cut" data-act="open-disband" data-id="${g.id}"
+               title="End the act — you decide who stays with the agency">Disband</button>`}
           ${g.active ? `<span class="tiny muted">Promotions end in ${g.active.promoWeeks - g.active.week} weeks</span>` : ''}
         </div>
       </article>`;
@@ -2221,6 +2223,87 @@
           brought in later starts at ${B.newcomer} against everybody, which is what a replacement really
           costs. A graduation costs the fandom, the public mood and the reputation of the agency, and the
           positions redistribute the same week.</span>
+      </div>`);
+  };
+
+  /* ------------------------------ disbanding ------------------------------
+     One row per member and one decision per row: kept on or released. Every
+     number on the page comes out of E.disbandPreview; the only thing the modal
+     owns is the list of who the player has ticked. */
+
+  ui.openDisband = function (gid) {
+    const pv = KP.engine.disbandPreview(KP.state, gid);
+    if (!pv.g) return;
+    ui.disband = { gid, keep: pv.rows.filter(r => r.willing).map(r => r.t.id) };
+    ui.drawDisband();
+  };
+
+  ui.drawDisband = function () {
+    const st = KP.state;
+    const w = ui.disband;
+    const pv = w && KP.engine.disbandPreview(st, w.gid);
+    if (!pv || !pv.g) return ui.closeModal();
+    const g = pv.g;
+    const trainee = KP.costs.traineeWeek;
+    const kept = pv.rows.filter(r => r.willing && w.keep.indexOf(r.t.id) >= 0);
+    const fee = kept.reduce((s, r) => s + r.cost, 0);
+
+    const rows = pv.rows.map(r => {
+      const t = r.t, on = r.willing && w.keep.indexOf(t.id) >= 0;
+      const term = r.left == null ? ''
+        : ' · ' + (r.left / KP.WEEKS_PER_YEAR).toFixed(1) + 'y on contract';
+      const why = !r.willing
+        ? `<span class="q neg">will not re-sign — leaves</span>`
+        : on
+          ? `<span class="q">stays · 📺 ${r.fame}</span>`
+          : `<span class="q neg">released</span>`;
+      const cost = !r.willing ? '' : r.cost
+        ? `<span class="c">${U.money(r.cost)} to re-sign</span>`
+        : `<span class="c">${on ? 'under contract' : ''}</span>`;
+      return `<button class="opt ${on ? 'is-on' : ''} ${r.willing ? '' : 'locked'}"
+          data-act="disband-toggle" data-id="${t.id}" ${r.willing ? '' : 'disabled'}>
+        <div><b>${U.esc(t.name)}</b><small>${U.esc(t.position || '')} · ovr ${KP.overall(t)} · ceiling ${
+          KP.potentialOverall(t)} · morale ${Math.round(t.morale)}${term}</small></div>
+        ${why}${cost}
+      </button>`;
+    }).join('');
+
+    const losses = [
+      pv.charting ? 'their song comes off the chart this week' : '',
+      pv.bookings ? pv.bookings + ' booked schedule' + (pv.bookings === 1 ? '' : 's') + ' cancelled, fees not refunded' : '',
+      pv.units.length ? 'the unit' + (pv.units.length === 1 ? ' ' : 's ') + pv.units.map(U.esc).join(', ') + ' end with it' : ''
+    ].filter(Boolean);
+
+    ui.modal(`
+      <div class="modal-head">
+        <div><div class="kr">해체</div><h3>Disband ${U.esc(g.name)}</h3></div>
+        <button class="modal-close" data-act="modal-close">✕</button>
+      </div>
+
+      <div class="est">
+        <div><b>${U.num(g.fans)}</b><span>Fans the act has</span></div>
+        <div><b class="neg">−${pv.rep}</b><span>Reputation</span></div>
+        <div><b>${kept.length} / ${pv.rows.length}</b><span>Kept on</span></div>
+        <div><b class="${fee ? 'neg' : ''}">${U.money(fee)}</b><span>Re-signing fees</span></div>
+      </div>
+
+      <div class="wiz-step">
+        <span class="eyebrow">Who stays with the agency — click to keep or release</span>
+        <div class="opt-list">${rows}</div>
+      </div>
+
+      ${losses.length ? `<p class="tiny neg" style="margin:10px 2px 0">Also: ${losses.join(' · ')}.</p>` : ''}
+
+      <div class="modal-foot">
+        <span class="tiny muted">The fandom goes with the act. Whoever stays goes back to the trainee room
+          (${U.money(trainee)} a week each) carrying a slice of it as 📺 fame — fans at their next debut or
+          line-up showcase, and it fades every week they sit in the practice room. Anybody in their final
+          contract year has to be re-signed to stay; anybody who would not re-sign walks. Whoever is released
+          is off the books — and about half the time turns up at a rival agency.</span>
+        <span class="spacer"></span>
+        <button class="btn" data-act="modal-close">Keep the group</button>
+        <button class="btn btn-cut" data-act="disband-confirm" ${pv.ok ? '' : 'disabled'}
+          title="${U.esc(pv.msg || '')}">Disband</button>
       </div>`);
   };
 

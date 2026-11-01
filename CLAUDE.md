@@ -316,6 +316,18 @@ folds any unit they were in, charges the fandom, the public mood and the reputat
 disbands the group if it empties. What happens to the *person* afterwards is the caller's:
 a graduate goes back to the trainee room, an expired contract walks out of the building.
 
+**A disbandment the player chooses is `E.disband`, and it decides per person.** It still
+ends through `disbandGroup` (units, diary, chart row and any story go with the act), but the
+people are the decision: kept on (trainee room, `KP.disband.morale` off, and a slice of the
+fandom as `t.fame`, scaled by loyalty, which the existing debut/join paths already cash and
+`trainWeek` already decays) or released (out of `st.trainees` and through `toMarket`, the same
+poach path an expired contract takes). It is not a free contract reset: anybody inside the
+renewal window costs `KP.renewCost` to keep — priced in `E.disbandPreview` *before*
+`disbandGroup` clears the group the fee is read off — and anybody `KP.willRenew` refuses
+walks whatever the player ticked. It refuses while `st.scandal` points at the group (ending
+the act is not an answer), and the fee gate is `fee > 0 && fee > money`, so a broke agency
+can still end an act. `E.disbandPreview` is the single source of the modal's numbers.
+
 **A contract is `t.debutAbs` + `t.contractAbs`, stamped at debut and nowhere else.** A
 trainee has neither — a training agreement has nothing to renegotiate — and `normalise()`
 strips them from anybody without a `groupId` for the same reason. `KP.renewCost()` is what
