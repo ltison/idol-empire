@@ -1097,12 +1097,10 @@ KP.contracts = {
    the group is gone) or released (off the books, and into the market on the
    same odds an expired contract walks into).
 
-   Two things stop it being a free contract reset. Anybody in their final year
-   is in the renewal conversation already, so keeping them costs exactly what
-   re-signing them would (`KP.renewCost`, read while the group still exists),
-   and anybody who would not re-sign at any price is not somebody the agency
-   gets to keep. Outside the window they are under contract and stay for free —
-   a re-debut is the new contract, and its price is the act that was given up. */
+   There is no fee for keeping anybody: the rest of their term goes with them
+   (`t.termAbs`), so a disbandment is never a contract reset, and somebody in
+   their final year who is not back in a line-up by the end of it walks. Renew
+   them BEFORE the act ends if they matter — the renewal table is for idols. */
 KP.disband = {
   rep: 4,                  // a disbandment is a headline the industry reads
   morale: 12,              // what it does to the people kept on

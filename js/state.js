@@ -150,7 +150,7 @@
      whole state every single week, and sixty-odd rival people carrying eight
      dead fields each is a third of the file. */
   const RIVAL_DROP = ['focus', 'weeksTrained', 'signCost', 'status', 'statusWeeks',
-    'position', 'stamina', 'morale', 'fame', 'votes', 'debutAbs', 'contractAbs'];
+    'position', 'stamina', 'morale', 'fame', 'votes', 'debutAbs', 'contractAbs', 'termAbs'];
 
   KP.stripRivalPerson = function (t) {
     RIVAL_DROP.forEach(k => { delete t[k]; });
@@ -722,10 +722,14 @@
      the trainee card and the tick all have to be quoting one date.
 
      A trainee has neither. A training agreement has nothing to renegotiate, and
-     a person who has never debuted cannot walk out on a fandom. */
+     a person who has never debuted cannot walk out on a fandom. Somebody whose
+     act ended and who stayed on the books holds the rest of their term as
+     `t.termAbs` instead — not renewable from the trainee room, but still a date
+     they walk on — and this is the one reader that answers for both. */
   KP.contractLeft = function (st, t) {
-    if (typeof t.contractAbs !== 'number') return null;
-    return t.contractAbs - KP.absWeek(st);
+    const at = typeof t.contractAbs === 'number' ? t.contractAbs : t.termAbs;
+    if (typeof at !== 'number') return null;
+    return at - KP.absWeek(st);
   };
 
   KP.inRenewWindow = function (st, t) {
@@ -1220,6 +1224,13 @@
         t.contractAbs = t.debutAbs + KP.contracts.termYears * w;
       }
       if (!t.groupId) { delete t.debutAbs; delete t.contractAbs; }
+      // A held term is somebody out of a line-up; in one it is contractAbs.
+      // An older file has none, so its graduates read as never-signed trainees —
+      // that history was not kept, and inventing a date would be worse.
+      if (t.groupId || typeof t.termAbs !== 'number' || !isFinite(t.termAbs)) delete t.termAbs;
+      // Fame on somebody in a group was cashed at their showcase (older builds
+      // left it on the record), and it must not be sold again at the next one.
+      if (t.groupId) t.fame = 0;
       if (typeof t.face === 'string' || t.face === null) return;
       const g = st.company.gender, total = KP.faces.count[g] || 0;
       t.face = total ? g + (U.hue(t.id) % total) : null;

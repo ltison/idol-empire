@@ -182,7 +182,8 @@
     // is already looking when they wonder who is worth keeping.
     const left = KP.contractLeft(st, t);
     const contract = left == null ? '' : KP.inRenewWindow(st, t)
-      ? `<span class="chip hot" title="Renew them or they walk when the term ends">📄 ${left}w left</span>`
+      ? `<span class="chip hot" title="${t.groupId ? 'Renew them or they walk when the term ends'
+        : 'Only a member of a line-up can be renewed — back in a group, or they walk when the term ends'}">📄 ${left}w left</span>`
       : `<span class="chip" title="Contract runs to the end of the term">📄 ${
         (left / KP.WEEKS_PER_YEAR).toFixed(1)}y</span>`;
     const fame = t.fame > 0
@@ -197,7 +198,7 @@
           // The act's own colour on the chip, so a roster of twenty faces sorts
           // itself into groups at a glance rather than by reading every card.
           ? `<div class="row"><span class="chip act" style="${skin(group.color)}">${U.esc(group.name)}</span><span class="chip">${U.esc(t.position || '')}</span>${contract}${fame}</div>${focusGrid(t)}`
-          : focusGrid(t) + `<div class="row" style="margin-top:8px">${fame}<span class="spacer"></span>
+          : focusGrid(t) + `<div class="row" style="margin-top:8px">${contract}${fame}<span class="spacer"></span>
               <button class="btn btn-sm btn-cut" data-act="release" data-id="${t.id}"
                 title="Tear up the contract — no refund">Release</button></div>`;
     } else if (mode === 'scout') {
@@ -2183,7 +2184,8 @@
         data-act="join-group" data-gid="${g.id}" data-id="${t.id}"
         ${st.company.money < cost || members.length >= 7 ? 'disabled' : ''}>
       <div><b>${U.esc(t.name)}</b><small>${t.age}y · ovr ${KP.overall(t)} · ceiling ${KP.potentialOverall(t)}${
-        t.fame > 0 ? ' · ' + Math.round(t.fame) + ' points of a name the public knows' : ''}</small></div>
+        t.fame > 0 ? ' · ' + Math.round(t.fame) + ' points of a name the public knows' : ''}${
+        KP.contractLeft(st, t) != null ? ' · ' + (KP.contractLeft(st, t) / KP.WEEKS_PER_YEAR).toFixed(1) + 'y left on their contract' : ''}</small></div>
       <span class="q">joins at ${B.newcomer}</span>
       <span class="c">${U.money(cost)}</span>
     </button>`).join('')
@@ -2234,7 +2236,7 @@
   ui.openDisband = function (gid) {
     const pv = KP.engine.disbandPreview(KP.state, gid);
     if (!pv.g) return;
-    ui.disband = { gid, keep: pv.rows.filter(r => r.willing).map(r => r.t.id) };
+    ui.disband = { gid, keep: pv.rows.map(r => r.t.id) };
     ui.drawDisband();
   };
 
@@ -2244,34 +2246,26 @@
     const pv = w && KP.engine.disbandPreview(st, w.gid);
     if (!pv || !pv.g) return ui.closeModal();
     const g = pv.g;
-    const trainee = KP.costs.traineeWeek;
-    const kept = pv.rows.filter(r => r.willing && w.keep.indexOf(r.t.id) >= 0);
-    const fee = kept.reduce((s, r) => s + r.cost, 0);
+    const kept = pv.rows.filter(r => w.keep.indexOf(r.t.id) >= 0);
+    const short = kept.filter(r => r.window);
 
     const rows = pv.rows.map(r => {
-      const t = r.t, on = r.willing && w.keep.indexOf(t.id) >= 0;
-      const term = r.left == null ? ''
-        : ' · ' + (r.left / KP.WEEKS_PER_YEAR).toFixed(1) + 'y on contract';
-      const why = !r.willing
-        ? `<span class="q neg">will not re-sign — leaves</span>`
-        : on
-          ? `<span class="q">stays · 📺 ${r.fame}</span>`
-          : `<span class="q neg">released</span>`;
-      const cost = !r.willing ? '' : r.cost
-        ? `<span class="c">${U.money(r.cost)} to re-sign</span>`
-        : `<span class="c">${on ? 'under contract' : ''}</span>`;
-      return `<button class="opt ${on ? 'is-on' : ''} ${r.willing ? '' : 'locked'}"
-          data-act="disband-toggle" data-id="${t.id}" ${r.willing ? '' : 'disabled'}>
+      const t = r.t, on = w.keep.indexOf(t.id) >= 0;
+      const term = r.left == null ? '' : r.window
+        ? `<span class="c neg">${r.left}w left on contract</span>`
+        : `<span class="c">${(r.left / KP.WEEKS_PER_YEAR).toFixed(1)}y on contract</span>`;
+      return `<button class="opt ${on ? 'is-on' : ''}" data-act="disband-toggle" data-id="${t.id}">
         <div><b>${U.esc(t.name)}</b><small>${U.esc(t.position || '')} · ovr ${KP.overall(t)} · ceiling ${
-          KP.potentialOverall(t)} · morale ${Math.round(t.morale)}${term}</small></div>
-        ${why}${cost}
+          KP.potentialOverall(t)} · morale ${Math.round(t.morale)}</small></div>
+        ${on ? `<span class="q">stays · 📺 ${r.fame}</span>` : `<span class="q neg">released</span>`}
+        ${term}
       </button>`;
     }).join('');
 
     const losses = [
       pv.charting ? 'their song comes off the chart this week' : '',
       pv.bookings ? pv.bookings + ' booked schedule' + (pv.bookings === 1 ? '' : 's') + ' cancelled, fees not refunded' : '',
-      pv.units.length ? 'the unit' + (pv.units.length === 1 ? ' ' : 's ') + pv.units.map(U.esc).join(', ') + ' end with it' : ''
+      pv.units.length ? (pv.units.length === 1 ? 'the unit ' : 'the units ') + pv.units.map(U.esc).join(', ') + ' end with it' : ''
     ].filter(Boolean);
 
     ui.modal(`
@@ -2284,7 +2278,7 @@
         <div><b>${U.num(g.fans)}</b><span>Fans the act has</span></div>
         <div><b class="neg">−${pv.rep}</b><span>Reputation</span></div>
         <div><b>${kept.length} / ${pv.rows.length}</b><span>Kept on</span></div>
-        <div><b class="${fee ? 'neg' : ''}">${U.money(fee)}</b><span>Re-signing fees</span></div>
+        <div><b>${U.money(kept.length * KP.costs.traineeWeek)}</b><span>A week, kept on</span></div>
       </div>
 
       <div class="wiz-step">
@@ -2292,14 +2286,16 @@
         <div class="opt-list">${rows}</div>
       </div>
 
+      ${short.length ? `<p class="tiny neg" style="margin:10px 2px 0">${short.map(r => U.esc(r.t.name)).join(', ')}
+        ${short.length === 1 ? 'is' : 'are'} in the final contract year. A contract can only be renewed from a
+        line-up — renew first on the Trainees tab, or they walk when the term ends unless they are back in a group.</p>` : ''}
       ${losses.length ? `<p class="tiny neg" style="margin:10px 2px 0">Also: ${losses.join(' · ')}.</p>` : ''}
 
       <div class="modal-foot">
-        <span class="tiny muted">The fandom goes with the act. Whoever stays goes back to the trainee room
-          (${U.money(trainee)} a week each) carrying a slice of it as 📺 fame — fans at their next debut or
-          line-up showcase, and it fades every week they sit in the practice room. Anybody in their final
-          contract year has to be re-signed to stay; anybody who would not re-sign walks. Whoever is released
-          is off the books — and about half the time turns up at a rival agency.</span>
+        <span class="tiny muted">The fandom goes with the act. Whoever stays goes back to the trainee room on the
+          rest of their own contract, carrying a slice of the fandom as 📺 fame — fans at their next debut or
+          line-up showcase, and it fades every week they sit in the practice room. Whoever is released is off
+          the books — and about half the time turns up at a rival agency.</span>
         <span class="spacer"></span>
         <button class="btn" data-act="modal-close">Keep the group</button>
         <button class="btn btn-cut" data-act="disband-confirm" ${pv.ok ? '' : 'disabled'}
