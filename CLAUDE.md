@@ -5,7 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 IDOL EMPIRE — a browser K-pop agency management sim. Zero dependencies, zero build step,
-zero tests. Plain `<script>` tags, no modules, no bundler, no package.json.
+one committed test (`test/saves.js`, save compatibility — see "Production"). Plain
+`<script>` tags, no modules, no bundler, no package.json.
 
 ## Running it
 
@@ -14,8 +15,14 @@ python3 -m http.server 8000     # then open http://localhost:8000
 ```
 
 `file://` mostly works too, but some browsers block `localStorage` there, which kills
-saving. There is nothing to build, lint or test — verifying a change means loading the
-page and playing a few weeks.
+saving. There is nothing to build or lint — verifying a change means loading the page and
+playing a few weeks, plus the one committed check:
+
+```bash
+node test/saves.js              # can the working tree read production's saves?
+```
+
+It needs Node and nothing else (no install, no browser), and runs in a few seconds.
 
 ## Production
 
@@ -25,6 +32,32 @@ it reaches players within minutes. Players' saves live in their own browser's
 `localStorage` on that origin and survive every deploy, which is why a state-shape change
 must follow the save-format rules below: a breaking change without a migration rung
 breaks real runs in progress, not just a dev file.
+
+**The rule: no change may break an existing save, and nothing merges to `master` until
+`node test/saves.js` passes.** Run it on the branch you are about to merge, paste its last
+line into the PR, and if it fails, fix the build — never the test, and never by deleting a
+fixture. What it checks:
+
+- It pulls the *production* build's `js/` out of git (`origin/master`, fetched first;
+  `--base <ref>` for anything else), plays three seeded careers on autopilot in a Node
+  sandbox, and keeps the raw `localStorage` value and the exported file at weeks 6, 60 and
+  170. Every committed file in `test/saves/` is added on top — saves from builds that no
+  longer exist, which is the only way a file three releases old stays tested.
+- The working tree must read every one of them through **both** doors (`KP.load()` and
+  `KP.importSave()`), without changing anything a player would call data loss (identity,
+  money, calendar, roster, groups, discography, trophies, awards, reviews, records, career
+  counters — `normalise()` may back-fill and tidy, never touch those), render every tab with
+  no `NaN`/`undefined` in the HTML, play 26 more weeks with no exception or non-finite
+  number, and round-trip its own save losslessly.
+- A failure prints the save, the step and the field. The seeds are fixed, so a failure is a
+  replay, not a flake.
+
+Two upkeep duties come with it. **After any merge that changes the state shape**, run
+`node test/saves.js --snapshot` on the new `master` and commit the fixture it writes, so
+that build's saves stay tested after the next one replaces it. And **the autopilot in
+`test/saves.js` should learn every new mechanic** that stores something (one guarded call in
+`autopilotWeek`), or the generated saves never contain it and the check is blind to it. The
+tab list is read from `main.js`, so a new tab is covered automatically.
 
 ## Architecture
 
